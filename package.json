@@ -1,0 +1,53 @@
+{
+  "name": "makerdashboard",
+  "version": "2.0.0",
+  "description": "Premium Maker Tool Dashboard v2",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "npm run sync-tools && npx electron-builder",
+    "sync-tools": "powershell -Command \"Remove-Item -Path 'bin/OrcaSlicer' -Recurse -Force -ErrorAction SilentlyContinue; Remove-Item -Path 'bin/LaserGRBL' -Recurse -Force -ErrorAction SilentlyContinue; New-Item -ItemType Directory -Path 'bin/OrcaSlicer' -Force; New-Item -ItemType Directory -Path 'bin/LaserGRBL' -Force; Copy-Item -Path 'C:/gelistirme/OrcaSlicer/build/src/Release/*' -Destination 'bin/OrcaSlicer' -Recurse -Force; Copy-Item -Path 'C:/gelistirme/LaserGRBL-master/LaserGRBL/bin/Debug/*' -Destination 'bin/LaserGRBL' -Recurse -Force\""
+  },
+  "keywords": [],
+  "author": "Antigravity AI",
+  "license": "ISC",
+  "devDependencies": {
+    "electron": "^28.3.3",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.maker.dashboard",
+    "productName": "MakerDashboard",
+    "files": [
+      "main.js",
+      "pages/**/*",
+      "services/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis",
+      "executableName": "MakerDashboard",
+      "icon": "assets/laser.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "MakerDashboard"
+    },
+    "extraResources": [
+      {
+        "from": "bin",
+        "to": "bin",
+        "filter": [
+          "**/*",
+          "!**/*.pdb",
+          "!**/*.lib",
+          "!**/*.exp",
+          "!**/*.obj"
+        ]
+      }
+    ]
+  }
+}

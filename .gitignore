@@ -1,0 +1,16 @@
+# Dependencies
+node_modules/
+
+# Production builds
+dist/
+bin/
+
+# Logs and temporary files
+*.log
+temp.txt
+worker_copy.txt
+worker_utf8.txt
+
+# OS files
+.DS_Store
+Thumbs.db

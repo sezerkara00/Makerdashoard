@@ -1,0 +1,49 @@
+:root {
+    /* ─── Dark Orange Theme ─────────────── */
+    --bg-color:        #111213;
+    --card-bg:         #1c1d1f;
+    --sidebar-bg:      #161718;
+    --surface-2:       #222426;
+    --surface-3:       #2a2c2f;
+
+    --text-main:       #f0f0f0;
+    --text-muted:      #7a7f8a;
+    --text-light:      #4a4f5a;
+
+    --accent:          #ff6b00;
+    --accent-hover:    #ff8124;
+    --accent-light:    rgba(255, 107, 0, 0.12);
+    --accent-glow:     rgba(255, 107, 0, 0.25);
+
+    --nav-active-bg:   rgba(255, 107, 0, 0.14);
+    --nav-active-color: #ff6b00;
+
+    --border:          #2a2c2f;
+    --border-light:    #222426;
+
+    --shadow-sm:       0 1px 4px rgba(0,0,0,0.35);
+    --shadow:          0 4px 18px rgba(0,0,0,0.45);
+    --shadow-md:       0 8px 28px rgba(0,0,0,0.55);
+    --shadow-orange:   0 4px 20px rgba(255,107,0,0.25);
+
+    --radius:          14px;
+    --radius-sm:       9px;
+    --sidebar-width:   190px;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Inter', sans-serif;
+    background-color: var(--bg-color);
+    color: var(--text-main);
+    overflow: hidden;
+}
+
+.hidden {
+    display: none !important;
+}
