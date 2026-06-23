@@ -142,7 +142,7 @@ function klippyAnalysisHasActivity(result) {
  */
 function parseKlippyLogContent(logContent, printerId = "edist_toolchanger_01", passedStartDt = null, initialState = null) {
     const logLines = logContent.split('\n');
-    
+
     // Find rollover date and correct for Klipper uptime offset.
     //
     // Klipper logs do NOT contain real wall-clock timestamps. Every "Stats X:" line
@@ -192,7 +192,7 @@ function parseKlippyLogContent(logContent, printerId = "edist_toolchanger_01", p
     if (!startDt) {
         startDt = new Date();
     }
-    
+
     const parserState = createKlippyParserState(initialState);
     let running = parserState.running;
     let pText = parserState.pText;
@@ -203,9 +203,9 @@ function parseKlippyLogContent(logContent, printerId = "edist_toolchanger_01", p
     let lastOpenedFilename = parserState.lastOpenedFilename;
     let lastStatsSec = parserState.lastStatsSec;
     let lastPrintStatsState = parserState.lastPrintStatsState;
-    
+
     const targetSensors = KLIPPY_TARGET_SENSORS;
-    
+
     const printStats = { Success: 0, Cancelled: 0, Errors: 0 };
     const uniqueErrorsMap = {};
     const baskiRaporuLines = [];
@@ -285,12 +285,12 @@ function parseKlippyLogContent(logContent, printerId = "edist_toolchanger_01", p
         running = false;
         pText = '';
     };
-    
+
     for (let idx = 0; idx < logLines.length; idx++) {
         const line = logLines[idx];
         const lineStrip = line.trim();
         const lineLower = lineStrip.toLowerCase();
-        
+
         if (!lineStrip) continue;
 
         // ── Klipper yeniden başlatma / gece yarısı log döndürme tespiti ──
@@ -336,12 +336,12 @@ function parseKlippyLogContent(logContent, printerId = "edist_toolchanger_01", p
                     const filenameVal = parts[1].split(',')[0].trim();
                     lastOpenedFilename = filenameVal;
                 }
-            } catch (e) {}
+            } catch (e) { }
         }
-        
+
         let exactTimestamp = '';
         let currentTimeStr = '';
-        
+
         // Time matching
         const timeMatch = lineStrip.match(/^(\d{2}):(\d{2}):(\d{2})/);
         if (timeMatch) {
@@ -366,7 +366,7 @@ function parseKlippyLogContent(logContent, printerId = "edist_toolchanger_01", p
                 }
             }
         }
-        
+
         if (lineLower.includes('stats ')) {
             statsStarted = true;
             const statsMatch = line.match(/stats\s+([\d.]+):/i);
@@ -377,21 +377,29 @@ function parseKlippyLogContent(logContent, printerId = "edist_toolchanger_01", p
                 pText += line + '\n';
             }
         }
-        
+
         // ========================================================
         // ❌ SENARYO A: SOYUTLANMIŞ DİNAMİK HATA KONTROLÜ
         // ========================================================
-        const hasErrorKeyword = lineStrip.includes('||') 
-            || lineLower.includes('emergency stop') 
+        const hasErrorKeyword = lineStrip.includes('||')
+            || lineLower.includes('emergency stop')
             || lineLower.includes('transition to shutdown')
             || lineLower.includes('configparser.error')
             || (lineLower.includes('config error') && !lineLower.includes('====='));
-        
+
         if (hasErrorKeyword) {
-            if (lineLower.includes('gcode_macro') || lineLower.includes('variable_') || lineLower.includes('gcode =')) {
+            // ⚠️ GCODE_MACRO VE DEĞİŞKENLER İÇİN ZATEN BİR İSTİSNA KOYMUŞTUN.
+            // 💡 ÇÖZÜM: Klipper'ın ekrana bastığı kalibrasyon ve bilgilendirme satırlarını da buraya ekleyelim!
+            if (
+                lineLower.includes('gcode_macro') ||
+                lineLower.includes('variable_') ||
+                lineLower.includes('gcode =') ||
+                lineLower.includes('action_respond_info') || // Makro kodunun kendisini yakalarsa es geç
+                lineLower.includes('hit the') ||             // "Hit the emergency stop button..." satırını es geç
+                lineLower.includes('starting pressure advance') // Kalibrasyon başlangıç metnini es geç
+            ) {
                 continue;
             }
-            
             let cleanErrorLine = lineStrip;
             if (lineLower.includes('transition to shutdown state:')) {
                 cleanErrorLine = lineStrip.split(/transition to shutdown state:/i).pop().trim();
@@ -401,12 +409,12 @@ function parseKlippyLogContent(logContent, printerId = "edist_toolchanger_01", p
             if (timePrefixMatch) {
                 cleanErrorLine = cleanErrorLine.substring(timePrefixMatch[0].length);
             }
-            
+
             const errorParts = cleanErrorLine.split('||');
             let errorType = "";
             let errorTitle = "";
             let errorDesc = "";
-            
+
             if (errorParts.length >= 3) {
                 errorType = errorParts[0].trim();
                 errorTitle = errorParts[1].trim();
@@ -422,7 +430,7 @@ function parseKlippyLogContent(logContent, printerId = "edist_toolchanger_01", p
                     errorDesc = cleanErrorLine;
                 }
             }
-            
+
             printStats.Errors++;
             let errorDuration = null;
             if (running) {
@@ -430,7 +438,7 @@ function parseKlippyLogContent(logContent, printerId = "edist_toolchanger_01", p
                 const durationMin = currentStartSec > 0 ? Math.max(0, Math.round(durationSec / 60)) : null;
                 if (durationMin !== null) errorDuration = durationMin;
             }
-            
+
             // Extract the last 60 lines of context and last 5 received G-code commands leading up to this error.
             const contextLines = [];
             const recentGcodes = [];
@@ -456,7 +464,7 @@ function parseKlippyLogContent(logContent, printerId = "edist_toolchanger_01", p
                     }
                 }
             }
-            
+
             const errorKey = `${errorType}_${exactTimestamp}_${idx}`;
             uniqueErrorsMap[errorKey] = {
                 time: exactTimestamp,
@@ -468,7 +476,7 @@ function parseKlippyLogContent(logContent, printerId = "edist_toolchanger_01", p
                 context: contextLines.slice(-40).join('\n'),
                 recentGcodes: recentGcodes.slice(-5)
             };
-            
+
             outgoingEvents.push({
                 eventType: "ERROR_REPORT",
                 payload: {
@@ -484,14 +492,14 @@ function parseKlippyLogContent(logContent, printerId = "edist_toolchanger_01", p
                     }
                 }
             });
-            
+
             if (running) {
                 const eventTime = formatDate(addSeconds(startDt, lastStatsSec));
                 const peaks = collectTemperaturePeaks(pText, logLines, targetSensors);
                 const durationSec = currentStartSec > 0 ? (lastStatsSec - currentStartSec) : 0;
                 const durationMin = currentStartSec > 0 ? Math.max(0, Math.round(durationSec / 60)) : '?';
                 const peaksStr = Object.entries(peaks).map(([sensor, temp]) => `${sensor}: ${temp}°C`).join(', ');
-                
+
                 let statsSuffix = '';
                 if (currentPrintStats.print_duration > 0) {
                     const pMin = Math.round(currentPrintStats.print_duration / 60);
@@ -539,7 +547,7 @@ function parseKlippyLogContent(logContent, printerId = "edist_toolchanger_01", p
                 lastPrintStatsState = psState;
             }
         }
-        
+
         // ========================================================
         // ✅ SENARYO C: BASKI BİTİŞİ VEYA KULLANICI İPTALİ
         // ========================================================
@@ -548,12 +556,12 @@ function parseKlippyLogContent(logContent, printerId = "edist_toolchanger_01", p
             finalizePrintSession(status, exactTimestamp);
         }
     }
-    
+
     const detectedErrorsList = Object.values(uniqueErrorsMap);
-    
+
     // Create formatted analysis report content
     let report = "";
-    
+
     // Outgoing Events Server log representation
     if (outgoingEvents.length > 0) {
         outgoingEvents.forEach(evt => {
@@ -563,7 +571,7 @@ function parseKlippyLogContent(logContent, printerId = "edist_toolchanger_01", p
             report += `------------------------------------------------------------\n`;
         });
     }
-    
+
     report += `\n============================================================\n`;
     report += `=== MAKERDASHBOARD GERÇEK BASKI RAPORU ===\n`;
     report += `Log Başlangıcı: ${formatDate(startDt)}\n`;
@@ -575,12 +583,12 @@ function parseKlippyLogContent(logContent, printerId = "edist_toolchanger_01", p
         report += `Log periyodunda gerçek zamanlı bir baskı hareketi gerçekleşmedi.\n`;
     }
     report += `============================================================\n`;
-    
+
     // Max Temperatures Report
     const detectedSensors = new Set();
     const sensorRegex1 = /([\w_]+):\s+[^:\n]*temp=/g;
     const sensorRegex2 = /([\w_]+):\s+target=/g;
-    
+
     for (const l of logLines) {
         if (l.includes('temp=')) {
             let match;
@@ -597,15 +605,15 @@ function parseKlippyLogContent(logContent, printerId = "edist_toolchanger_01", p
             }
         }
     }
-    
+
     const sortedSensors = Array.from(detectedSensors).sort();
-    
+
     report += `\n=== BASKI ESNASINDA ÖLÇÜLEN MAKSIMUM GERÇEK SICAKLIKLAR ===\n`;
     sortedSensors.forEach(s => {
         if (s.toLowerCase() === 'stats') return;
         const r1 = new RegExp(s + ':\\s+[^:\\n]*temp=([\\d.-]+)');
         const r2 = new RegExp(s + ':\\s+target=\\d+\\s+temp=([\\d.-]+)');
-        
+
         const tempValues = [];
         for (const l of logLines) {
             if (l.includes(s)) {
@@ -629,14 +637,14 @@ function parseKlippyLogContent(logContent, printerId = "edist_toolchanger_01", p
         report += `${s}: ${maxTemp.toFixed(1)} °C\n`;
     });
     report += `============================================================\n`;
-    
+
     // Errors table report
     report += `\n===================================================================================================================\n`;
     report += `              📊 MAKERDASHBOARD GERÇEK ZAMANLI SENKRONİZE MAP TABLOSU               \n`;
     report += `===================================================================================================================\n`;
     report += `\n[GENEL ÖZET] Gerçek Başarılı: ${printStats.Success} | Gerçek İptal: ${printStats.Cancelled} | Yakalanan Hatalar: ${printStats.Errors}\n`;
     report += `\n[YAKALANAN TÜM KRİTİK HATALARIN LİSTESİ]\n`;
-    
+
     if (detectedErrorsList.length > 0) {
         report += `+----------+---------------+---------------------------+--------------------------------------------------------+\n`;
         report += `| Saat     | Hata Kodu     | Hata Başlığı              | Ayıklanan Açıklama                                     |\n`;
@@ -656,7 +664,7 @@ function parseKlippyLogContent(logContent, printerId = "edist_toolchanger_01", p
         report += `+-----------------------------------------------------------------------------------------------------------------------+\n`;
     }
     report += `===================================================================================================================\n`;
-    
+
     return {
         printStats,
         errorCount: printStats.Errors,
@@ -684,12 +692,12 @@ function saveRunToDatabase(printerId, fileName, fileSize, analysisResult, increm
     const db = getPrinterDb(printerId);
     const parsedSections = extractRunSections(analysisResult.reportContent);
     const rawErrors = analysisResult.errors || parsedSections.errors || [];
-    
+
     if (incremental) {
         const existingRun = db.get('analysis_runs')
             .find({ fileName })
             .value();
-            
+
         if (existingRun) {
             // Deduplicated merge — same event text must not appear twice.
             // This prevents Emergency Stop / cancel lines from accumulating on every incremental parse.
@@ -715,7 +723,7 @@ function saveRunToDatabase(printerId, fileName, fileSize, analysisResult, increm
             existingRun.summary.cancelled += parsedSections.summary.cancelled || 0;
             existingRun.summary.paused += parsedSections.summary.paused || 0;
             existingRun.summary.errors += parsedSections.summary.errors || 0;
-            
+
             parsedSections.maxTemps.forEach(incoming => {
                 const existing = existingRun.maxTemps.find(item => item.sensor === incoming.sensor);
                 if (existing) {
@@ -728,20 +736,20 @@ function saveRunToDatabase(printerId, fileName, fileSize, analysisResult, increm
                     existingRun.maxTemps.push(incoming);
                 }
             });
-            
+
             // Recalculate printSessions for incremental merge
             existingRun.printSessions = buildPrintSessionsFromEvents(existingRun.baskiRaporu, existingRun.maxTemps);
 
             existingRun.lastSyncTime = new Date().toLocaleString('tr-TR');
             existingRun.fileSize = fileSize;
             existingRun.reportContent += '\n' + analysisResult.reportContent;
-            
+
             db.write();
             if (!skipStatsUpdate) updateTotalPrintDuration(printerId);
             return;
         }
     }
-    
+
     // Non-incremental or first-time incremental: overwrite
     db.get('analysis_runs').remove({ fileName }).write();
     db.get('analysis_runs').push({
@@ -822,7 +830,7 @@ async function syncAndAnalyzePrinterLogs(printer) {
     const klippyLogFiles = files.filter(f => f.filename && (f.filename.startsWith('klippy.log') || f.filename.includes('klippy.log')));
 
     console.log(`[Log Analyzer] Found ${klippyLogFiles.length} log files on host.`);
-    
+
     let processedCount = 0;
     let totalErrorsDetected = 0;
 
@@ -854,7 +862,7 @@ async function syncAndAnalyzePrinterLogs(printer) {
         // Retrieve log contents from Moonraker logs endpoint
         const downloadUrl = `http://${host}/server/files/logs/${encodeURIComponent(fileName)}`;
         console.log(`[Log Analyzer] Retrieving: ${downloadUrl}`);
-        
+
         let newContent = '';
         let rolloverDateForFile = null;
         let rangeSucceeded = false;
@@ -910,7 +918,7 @@ async function syncAndAnalyzePrinterLogs(printer) {
                 continue;
             }
         }
-        
+
         // Full download path: for rotated logs or when Range request failed/not applicable
         if (!rangeSucceeded && !newContent) {
             let downloadRes;
@@ -926,7 +934,7 @@ async function syncAndAnalyzePrinterLogs(printer) {
             }
 
             const logContent = await downloadRes.text();
-            
+
             // Extract new content from lastProcessedSize
             if (isActiveLog && lastProcessedSize > 0) {
                 newContent = logContent.substring(lastProcessedSize);
@@ -967,7 +975,7 @@ async function syncAndAnalyzePrinterLogs(printer) {
         const analysisResult = parseKlippyLogContent(newContent, printer.id, rolloverDateForFile, savedParserState);
         // Release newContent after parsing
         newContent = null;
-        
+
         if (isActiveLog) {
             state.parserStates[fileName] = analysisResult.parserState;
         } else {
@@ -980,14 +988,14 @@ async function syncAndAnalyzePrinterLogs(printer) {
             console.log(`[Log Analyzer] Skipping empty analysis append for ${fileName}.`);
             continue;
         }
-        
+
         // Save remote log run to database
         saveRunToDatabase(printer.id, fileName, fileSize, analysisResult, isActiveLog, true);
-        
+
         // Update state
         state.files[fileName] = fileSize;
         fs.writeFileSync(statePath, JSON.stringify(state, null, 2), 'utf8');
-        
+
         totalErrorsDetected += analysisResult.errorCount;
         processedCount++;
     }
@@ -1006,7 +1014,7 @@ function parsePrinterLogsTxt(content) {
     const baskiRaporuLines = [];
     const printStats = { Success: 0, Cancelled: 0, Errors: 0, Paused: 0 };
     const uniqueErrorsMap = {};
-    
+
     const maxTemps = {
         extruder: 0,
         extruder1: 0,
@@ -1015,7 +1023,7 @@ function parsePrinterLogsTxt(content) {
         heater_bed: 0,
         env: 0
     };
-    
+
     let currentPrintStart = null;
     let currentPrintFile = '';
     let progressSessionActive = false;
@@ -1048,7 +1056,7 @@ function parsePrinterLogsTxt(content) {
 
             const bedMatch = line.match(/Bed:\s*(\d+)°C/);
             if (bedMatch) maxTemps.heater_bed = Math.max(maxTemps.heater_bed, parseFloat(bedMatch[1]));
-            
+
             progressSessionActive = true;
             if (baskiRaporuLines.length > 0 && progressSessionActive && baskiRaporuLines[baskiRaporuLines.length - 1].includes('[PROGRESS]')) {
                 baskiRaporuLines[baskiRaporuLines.length - 1] = line;
@@ -1066,7 +1074,7 @@ function parsePrinterLogsTxt(content) {
             currentPrintFile = fileMatch ? fileMatch[1].trim() : '';
             currentPrintStart = timestamp;
             progressSessionActive = true;
-            
+
             baskiRaporuLines.push(`🚀 Baskı Başladı (${currentPrintFile}) : ${timestamp}`);
         }
 
@@ -1089,7 +1097,7 @@ function parsePrinterLogsTxt(content) {
             printStats.Success++;
             const fileMatch = line.match(/Dosya:\s*(.*?)(?:\s*\(%|\s*-\s*PrintTime|\s*-\s*TotalTime|$)/i);
             const file = fileMatch ? fileMatch[1].trim() : currentPrintFile;
-            
+
             let durationStr = '';
             if (currentPrintStart && timestamp) {
                 try {
@@ -1105,9 +1113,9 @@ function parsePrinterLogsTxt(content) {
                         const diffMin = Math.round((date2 - date1) / 60000);
                         if (diffMin >= 0) durationStr = ` - Süre: ${diffMin} dk`;
                     }
-                } catch(e){}
+                } catch (e) { }
             }
-            
+
             let statsSuffix = '';
             const printTimeMatch = line.match(/PrintTime:\s*([\d.]+)\s*dk(?:\s*\(([\d.]+)\s*sn\))?/i);
             if (printTimeMatch) {
@@ -1119,7 +1127,7 @@ function parsePrinterLogsTxt(content) {
                 statsSuffix += ` - TotalTime: ${totalTimeMatch[1]} dk`;
                 if (totalTimeMatch[2]) statsSuffix += ` (${totalTimeMatch[2]} sn)`;
             }
-            
+
             let peakStrList = [];
             if (maxTemps.extruder > 0) peakStrList.push(`extruder: ${maxTemps.extruder}°C`);
             if (maxTemps.extruder1 > 0) peakStrList.push(`extruder1: ${maxTemps.extruder1}°C`);
@@ -1140,7 +1148,7 @@ function parsePrinterLogsTxt(content) {
             progressSessionActive = false;
             const fileMatch = line.match(/Dosya:\s*(.*?)(?:\s*\(%|\s*-\s*PrintTime|\s*-\s*TotalTime|$)/i);
             const file = fileMatch ? fileMatch[1].trim() : currentPrintFile;
-            
+
             let durationStr = '';
             if (currentPrintStart && timestamp) {
                 try {
@@ -1156,7 +1164,7 @@ function parsePrinterLogsTxt(content) {
                         const diffMin = Math.round((date2 - date1) / 60000);
                         if (diffMin >= 0) durationStr = ` - Süre: ${diffMin} dk`;
                     }
-                } catch(e){}
+                } catch (e) { }
             }
 
             let statsSuffix = '';
@@ -1212,7 +1220,7 @@ function parsePrinterLogsTxt(content) {
                         const diffMin = Math.round((date2 - date1) / 60000);
                         if (diffMin >= 0) errorDuration = diffMin;
                     }
-                } catch (e) {}
+                } catch (e) { }
             }
             const errorKey = `${errDesc}_${timestamp}_${i}`;
             uniqueErrorsMap[errorKey] = {
@@ -1252,7 +1260,7 @@ function parsePrinterLogsTxt(content) {
     report += `===================================================================================================================\n`;
     report += `\n[GENEL ÖZET] Gerçek Başarılı: ${printStats.Success} | Gerçek İptal: ${printStats.Cancelled} | Duraklatıldı: ${printStats.Paused} | Yakalanan Hatalar: ${printStats.Errors}\n`;
     report += `\n[YAKALANAN TÜM KRİTİK HATALARIN LİSTESİ]\n`;
-    
+
     const errorsList = Object.values(uniqueErrorsMap);
     if (errorsList.length > 0) {
         report += `+----------+---------------+---------------------------+----------+---------------------------------------------+\n`;
@@ -1293,7 +1301,7 @@ function extractRunSections(content) {
         errors: [],
         printSessions: []
     };
-    
+
     const serverLogRegex = /📡 \[SERVER LOG\] OUTGOING EVENT: ([^\n]+)[\s-]*(\{[\s\S]*?\})[\s-]*/g;
     let sMatch;
     while ((sMatch = serverLogRegex.exec(content)) !== null) {
@@ -1309,7 +1317,7 @@ function extractRunSections(content) {
             });
         }
     }
-    
+
     const baskiRaporuMatch = content.match(/=== MAKERDASHBOARD GERÇEK BASKI RAPORU ===([\s\S]*?)===/);
     if (baskiRaporuMatch) {
         const lines = baskiRaporuMatch[1].trim().split('\n');
@@ -1337,7 +1345,7 @@ function extractRunSections(content) {
             }
         });
     }
-    
+
     const maxTempsMatch = content.match(/=== BASKI ESNASINDA ÖLÇÜLEN MAKSIMUM GERÇEK SICAKLIKLAR ===([\s\S]*?)===/);
     if (maxTempsMatch) {
         const lines = maxTempsMatch[1].trim().split('\n');
@@ -1351,7 +1359,7 @@ function extractRunSections(content) {
             }
         });
     }
-    
+
     const summaryMatch = content.match(/\[GENEL ÖZET\] Gerçek Başarılı:\s*(\d+)\s*\|\s*Gerçek İptal:\s*(\d+)(?:\s*\|\s*Duraklatıldı:\s*(\d+))?\s*\|\s*Yakalanan Hatalar:\s*(\d+)/);
     if (summaryMatch) {
         sections.summary = {
@@ -1361,7 +1369,7 @@ function extractRunSections(content) {
             errors: parseInt(summaryMatch[4], 10)
         };
     }
-    
+
     const errorsMatch = content.match(/\[YAKALANAN TÜM KRİTİK HATALARIN LİSTESİ\][\s\S]*?\+[-+]+\+[\s\S]*?\+[-+]+\+([\s\S]*?)\+[-+]+\+/);
     if (errorsMatch) {
         const lines = errorsMatch[1].trim().split('\n');
@@ -1393,7 +1401,7 @@ function extractRunSections(content) {
 
     // Build print sessions list
     sections.printSessions = buildPrintSessionsFromEvents(sections.baskiRaporu, sections.maxTemps);
-    
+
     return sections;
 }
 
@@ -1448,10 +1456,10 @@ function buildPrintSessionsFromEvents(baskiRaporu, runMaxTemps) {
             const dateB = parseTrLogDate(timeB);
             if (!dateA) return 1;
             if (!dateB) return -1;
-            
+
             const diff = dateA - dateB;
             if (diff !== 0) return diff;
-            
+
             const eventTypePriority = {
                 'start': 1,
                 'resume': 2,
@@ -1462,7 +1470,7 @@ function buildPrintSessionsFromEvents(baskiRaporu, runMaxTemps) {
                 'error': 7,
                 'info': 8
             };
-            
+
             const priorityA = eventTypePriority[a.type] || 9;
             const priorityB = eventTypePriority[b.type] || 9;
             return priorityA - priorityB;
@@ -1521,7 +1529,7 @@ function buildPrintSessionsFromEvents(baskiRaporu, runMaxTemps) {
             current.status = 'completed';
             current.endTime = time;
             current.events.push(item);
-            
+
             const peaksMatch = text.match(/Peak Sıcaklıklar:\s*\[(.*?)\]/i);
             if (peaksMatch) {
                 current.peaksText = peaksMatch[1].trim();
@@ -1550,7 +1558,7 @@ function buildPrintSessionsFromEvents(baskiRaporu, runMaxTemps) {
 
             current.printTime = printTime;
             current.totalTime = totalTime;
-            
+
             closeSession();
             continue;
         }
@@ -1589,7 +1597,7 @@ function buildPrintSessionsFromEvents(baskiRaporu, runMaxTemps) {
 
             current.printTime = printTime;
             current.totalTime = totalTime;
-            
+
             closeSession();
             continue;
         }
@@ -1614,10 +1622,10 @@ function buildPrintSessionsFromEvents(baskiRaporu, runMaxTemps) {
             if (current.maxTemps) {
                 const t0Match = text.match(/(?:T0|extruder):\s*([\d.]+)/i);
                 if (t0Match) current.maxTemps.extruder = Math.max(current.maxTemps.extruder, parseFloat(t0Match[1]));
-                
+
                 const t1Match = text.match(/T1:\s*([\d.]+)/i);
                 if (t1Match) current.maxTemps.extruder1 = Math.max(current.maxTemps.extruder1 || 0, parseFloat(t1Match[1]));
-                
+
                 const t2Match = text.match(/T2:\s*([\d.]+)/i);
                 if (t2Match) current.maxTemps.extruder2 = Math.max(current.maxTemps.extruder2 || 0, parseFloat(t2Match[1]));
 
@@ -1626,7 +1634,7 @@ function buildPrintSessionsFromEvents(baskiRaporu, runMaxTemps) {
 
                 const bedMatch = text.match(/(?:Bed|heater_bed):\s*([\d.]+)/i);
                 if (bedMatch) current.maxTemps.heater_bed = Math.max(current.maxTemps.heater_bed, parseFloat(bedMatch[1]));
-                
+
                 const envMatch = text.match(/Env:\s*([\d.]+)/i);
                 if (envMatch) current.maxTemps.env = Math.max(current.maxTemps.env || 0, parseFloat(envMatch[1]));
             }
@@ -1662,7 +1670,7 @@ function buildPrintSessionsFromEvents(baskiRaporu, runMaxTemps) {
                 }
             }
         }
-        
+
         // Populate peaksText for active sessions using maxTemps
         if (!session.peaksText && session.maxTemps) {
             const peakStrList = [];
@@ -1681,7 +1689,7 @@ function buildPrintSessionsFromEvents(baskiRaporu, runMaxTemps) {
         if (!session.peaksText && runMaxTemps && runMaxTemps.length > 0) {
             session.peaksText = runMaxTemps.map(t => `${t.sensor}: ${t.value}`).join(', ');
         }
-        
+
         // Remove progress lines from the events array (satisfying timeline cleanliness requirement)
         session.events = session.events.filter(e => {
             const t = e.text || '';
@@ -1700,13 +1708,13 @@ function buildPrintSessionsFromEvents(baskiRaporu, runMaxTemps) {
         return session.events.some(evt => {
             const t = (evt.text || '').toLowerCase();
             return evt.type === 'start' ||
-                   evt.type === 'success' ||
-                   evt.type === 'cancel' ||
-                   evt.type === 'error' ||
-                   t.includes('baskı başladı') ||
-                   t.includes('baskı bitti') ||
-                   t.includes('baskı tamamlandı') ||
-                   t.includes('baskı iptal');
+                evt.type === 'success' ||
+                evt.type === 'cancel' ||
+                evt.type === 'error' ||
+                t.includes('baskı başladı') ||
+                t.includes('baskı bitti') ||
+                t.includes('baskı tamamlandı') ||
+                t.includes('baskı iptal');
         });
     });
 
@@ -1719,7 +1727,7 @@ function formatSecondsToTurkish(totalSecs) {
     const hrs = Math.floor(totalSecs / 3600);
     const mins = Math.floor((totalSecs % 3600) / 60);
     const secs = totalSecs % 60;
-    
+
     let parts = [];
     if (hrs > 0) {
         parts.push(`${hrs}sa`);
@@ -1734,7 +1742,7 @@ function formatSecondsToTurkish(totalSecs) {
 function updateTotalPrintDuration(printerId) {
     const db = getPrinterDb(printerId);
     const runs = db.get('analysis_runs').value() || [];
-    
+
     // Gather all sessions from all runs
     let allSessions = [];
     runs.forEach(run => {
@@ -1745,7 +1753,7 @@ function updateTotalPrintDuration(printerId) {
             allSessions.push(sCopy);
         });
     });
-    
+
     // Sort chronologically by startTime
     allSessions.sort((a, b) => {
         const dateA = parseTrLogDate(a.startTime);
@@ -1754,20 +1762,20 @@ function updateTotalPrintDuration(printerId) {
         if (!dateB) return -1;
         return dateA - dateB;
     });
-    
+
     // Stitch sessions that span across files
     const stitchedSessions = [];
     let activeOpenSession = null;
-    
+
     for (const sess of allSessions) {
         const hasStart = sess.events && sess.events.some(e => e.type === 'start' || /Baskı Başladı/i.test(e.text || ''));
-        
+
         if (sess.status === 'printing' || sess.status === 'paused') {
             if (activeOpenSession) {
                 // Auto-close previous printing session as cancelled at the start of this new print session
                 activeOpenSession.status = 'cancelled';
                 activeOpenSession.endTime = sess.startTime;
-                
+
                 const startD = parseTrLogDate(activeOpenSession.startTime);
                 const endD = parseTrLogDate(activeOpenSession.endTime);
                 if (startD && endD) {
@@ -1780,7 +1788,7 @@ function updateTotalPrintDuration(printerId) {
                     }
                 }
                 delete activeOpenSession.activeDuration;
-                
+
                 stitchedSessions.push(activeOpenSession);
             }
             activeOpenSession = sess;
@@ -1795,7 +1803,7 @@ function updateTotalPrintDuration(printerId) {
                 activeOpenSession.endTime = sess.endTime;
                 activeOpenSession.peaksText = sess.peaksText || activeOpenSession.peaksText;
                 activeOpenSession.events = activeOpenSession.events.concat(sess.events);
-                
+
                 const startD_active = parseTrLogDate(activeOpenSession.startTime);
                 const endD_active = parseTrLogDate(activeOpenSession.endTime);
                 if (startD_active && endD_active) {
@@ -1806,15 +1814,15 @@ function updateTotalPrintDuration(printerId) {
                         activeOpenSession.totalTime = Math.round(diffMs / 1000);
                     }
                 }
-                
+
                 if (sess.printTime) {
                     activeOpenSession.printTime = sess.printTime;
                 } else if (activeOpenSession.totalTime) {
                     activeOpenSession.printTime = activeOpenSession.totalTime;
                 }
-                
+
                 delete activeOpenSession.activeDuration;
-                
+
                 stitchedSessions.push(activeOpenSession);
                 activeOpenSession = null;
             } else {
@@ -1840,7 +1848,7 @@ function updateTotalPrintDuration(printerId) {
                         }
                     }
                     delete activeOpenSession.activeDuration;
-                    
+
                     stitchedSessions.push(activeOpenSession);
                     activeOpenSession = null;
                 }
@@ -1869,7 +1877,7 @@ function updateTotalPrintDuration(printerId) {
                     }
                 }
                 delete activeOpenSession.activeDuration;
-                
+
                 stitchedSessions.push(activeOpenSession);
                 activeOpenSession = null;
             }
@@ -1901,17 +1909,17 @@ function updateTotalPrintDuration(printerId) {
         }
         stitchedSessions.push(activeOpenSession);
     }
-    
+
     let totalPrintJobs = 0;
     let maxJobSeconds = 0;
     let sumTotalSeconds = 0;
     let sumPrintSeconds = 0;
-    
+
     stitchedSessions.forEach(sess => {
         // Count completed and cancelled jobs
         if (sess.status === 'completed' || sess.status === 'cancelled') {
             totalPrintJobs++;
-            
+
             let sessionSec = 0;
             if (sess.totalTime) {
                 sessionSec = sess.totalTime;
@@ -1919,25 +1927,25 @@ function updateTotalPrintDuration(printerId) {
                 const match = String(sess.duration).match(/(\d+)/);
                 if (match) sessionSec = parseInt(match[1], 10) * 60;
             }
-            
+
             let printSec = 0;
             if (sess.printTime) {
                 printSec = sess.printTime;
             } else {
                 printSec = sessionSec;
             }
-            
+
             if (sessionSec > maxJobSeconds) {
                 maxJobSeconds = sessionSec;
             }
-            
+
             sumTotalSeconds += sessionSec;
             sumPrintSeconds += printSec;
         }
     });
-    
+
     let totalMinutesForLegacyField = Math.round(sumPrintSeconds / 60);
-    
+
     // Add current active print duration (if any)
     const activeSess = stitchedSessions.find(sess => (sess.status === 'printing' || sess.status === 'paused') && (sess.fileName === 'klippy.log' || sess.fileName === 'printer_logs.txt'));
     if (activeSess && activeSess.activeDuration) {
@@ -1946,9 +1954,9 @@ function updateTotalPrintDuration(printerId) {
             totalMinutesForLegacyField += parseInt(match[1], 10);
         }
     }
-    
+
     const avgTimeSec = totalPrintJobs > 0 ? (sumPrintSeconds / totalPrintJobs) : 0;
-    
+
     const stats = {
         totalPrintJobs: totalPrintJobs,
         longestJob: formatSecondsToTurkish(maxJobSeconds),
@@ -1956,10 +1964,10 @@ function updateTotalPrintDuration(printerId) {
         totalPrintTime: formatSecondsToTurkish(sumPrintSeconds),
         avgTimePerPrint: formatSecondsToTurkish(avgTimeSec)
     };
-    
+
     db.set('totalPrintDuration', totalMinutesForLegacyField).write();
     db.set('stats', stats).write();
-    
+
     console.log(`[DB] Recalculated stats for ${printerId}:`, stats);
     return totalMinutesForLegacyField;
 }
