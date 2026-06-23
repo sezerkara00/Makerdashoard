@@ -533,6 +533,8 @@
                         <div class="stat-pill"><span class="stat-dot gray"></span><span
                                 id="stat-offline-printers">1</span> <span
                                 data-i18n="printers.stat_offline">Çevrimdışı</span></div>
+                        <div class="stat-pill" style="background: rgba(255, 107, 0, 0.08); border-color: rgba(255, 107, 0, 0.25);"><span class="stat-dot orange"></span><span
+                                id="stat-total-print-time">0 dk</span> <span>Toplam Süre</span></div>
                     </div>
 
                     <button class="btn-add-printer" id="open-add-modal-btn">
@@ -762,6 +764,40 @@
                 <webview id="printer-host-webview" src="about:blank" class="wiki-webview"></webview>
             </div>
 
+            <!-- DETAILED ANALYSIS VIEW (hidden by default) -->
+            <div class="workspace-view hidden" id="detailed-analysis-view">
+                <div class="printers-header">
+                    <div class="printers-title-section">
+                        <svg class="printers-header-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                            <polyline points="16 8 16 6 8 6 8 8" />
+                            <line x1="9" y1="13" x2="15" y2="13" />
+                            <line x1="9" y1="17" x2="15" y2="17" />
+                        </svg>
+                        <div>
+                            <h1 class="printers-title">Yazıcı Log Analizi - Detaylı Rapor</h1>
+                            <p class="printers-subtitle" id="detailed-analysis-subtitle">Raporun detaylı içeriği</p>
+                        </div>
+                    </div>
+                    <button class="wiki-nav-btn" id="detailed-analysis-close-btn" title="Kapat" style="width: auto; padding: 0 10px; gap: 4px;">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="18" y1="6" x2="6" y2="18" />
+                            <line x1="6" y1="6" x2="18" y2="18" />
+                        </svg>
+                        Kapat
+                    </button>
+                </div>
+                <div style="flex: 1; overflow-y: auto; padding: 24px;">
+                    <div id="detailed-analysis-content" style="max-width: 1200px; margin: 0 auto;">
+                        <div style="text-align: center; color: var(--text-muted); padding: 40px;">
+                            <p>Rapor yükleniyor...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- WORKSPACE VIEW (hidden by default) -->
             <div class="workspace-view hidden" id="workspace-view">
                 <div class="printers-header">
@@ -775,8 +811,7 @@
                         </svg>
                         <div>
                             <h1 class="printers-title" data-i18n="workspace.title">Atölye İstatistikleri</h1>
-                            <p class="printers-subtitle" data-i18n="workspace.subtitle">Bağlı yazıcılarınızın kullanım
-                                sürelerini ve filament harcamalarını inceleyin.</p>
+                            <p class="printers-subtitle" data-i18n="workspace.subtitle">Bağlı yazıcılarınızın kullanım sürelerini inceleyin.</p>
                         </div>
                     </div>
                 </div>
@@ -799,21 +834,7 @@
                         </div>
                     </div>
 
-                    <!-- Total Filament Card -->
-                    <div class="wstat-card">
-                        <div class="wstat-icon-wrap wstat-orange">
-                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
-                            </svg>
-                        </div>
-                        <div class="wstat-info">
-                            <span class="wstat-label" data-i18n="workspace.stat_total_filament">Toplam Filament
-                                Tüketimi</span>
-                            <h3 class="wstat-value"><span id="wstat-val-filament">0</span> <small
-                                    data-i18n="workspace.meters">metre</small></h3>
-                        </div>
-                    </div>
+
 
                     <!-- Total Jobs Card -->
                     <div class="wstat-card">
@@ -950,10 +971,7 @@
                                         <span class="smc-label" data-i18n="workspace.stat_total_time">Toplam Süre</span>
                                         <div class="smc-value"><span id="stats-period-time">0</span> <small data-i18n="workspace.hours">saat</small></div>
                                     </div>
-                                    <div class="stats-metric-card">
-                                        <span class="smc-label" data-i18n="workspace.stat_total_filament">Filament</span>
-                                        <div class="smc-value"><span id="stats-period-filament">0.0</span> <small>kg</small></div>
-                                    </div>
+
                                     <div class="stats-metric-card">
                                         <span class="smc-label" data-i18n="workspace.chart_total_prints">Baskı Sayısı</span>
                                         <div class="smc-value"><span id="stats-period-count">0</span> <small data-i18n="workspace.prints">Baskı</small></div>
@@ -1580,9 +1598,10 @@
                 <div id="analysis-results-structured" style="display: flex; flex-direction: column; gap: 16px;"></div>
 
                 <!-- Tab Content 2: Ham Metin Dökümü -->
-                <pre id="analysis-results-pre" class="hidden" style="margin: 0; padding: 15px; background: #07090e; color: #00ff66; border: 1px solid var(--border); border-radius: 8px; font-family: monospace; font-size: 11.5px; line-height: 1.5; overflow: auto; white-space: pre-wrap; word-break: break-all; max-height: 50vh; box-shadow: inset 0 2px 8px rgba(0,0,0,0.8);"></pre>
+                <pre id="analysis-results-pre" class="hidden" style="margin: 0; padding: 15px; background: #07090e; color: #00ff66; border: 1px solid var(--border); border-radius: 8px; font-family: monospace; font-size: 13px; line-height: 1.5; overflow: auto; white-space: pre-wrap; word-break: break-all; max-height: 50vh; box-shadow: inset 0 2px 8px rgba(0,0,0,0.8);"></pre>
             </div>
             <div class="modal-footer" style="padding: 16px 24px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 10px; background: var(--card-bg); border-radius: 0 0 10px 10px;">
+                <button class="btn-primary" id="analysis-show-full-btn" style="margin: 0; padding: 8px 20px; width: auto; background: var(--accent);">Detaylı Görüntüle</button>
                 <button class="btn-primary" id="analysis-close-btn" style="margin: 0; padding: 8px 20px; width: auto;">Kapat</button>
             </div>
         </div>

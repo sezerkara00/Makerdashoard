@@ -1746,21 +1746,57 @@ mark.proj-highlight {
 
 .filter-tab.active {
     color: var(--accent);
-    background: var(--card-bg);
-    font-weight: 600;
-    box-shadow: var(--shadow-sm);
+    background: var(--accent-light);
+    border: 1px solid rgba(var(--accent-rgb, 255 107 0) / 0.25);
+    font-weight: 700;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+}
+
+/* Mode filter active colors */
+.filter-tab-mode[data-mode="all"].active {
+    color: var(--accent);
+    background: var(--accent-light);
+}
+
+.filter-tab-mode[data-mode="lan"].active {
+    color: #2ec4b6;
+    background: rgba(46, 196, 182, 0.12);
+    border-color: rgba(46, 196, 182, 0.3);
+}
+
+.filter-tab-mode[data-mode="online"].active {
+    color: #3a86c8;
+    background: rgba(58, 134, 200, 0.12);
+    border-color: rgba(58, 134, 200, 0.3);
+}
+
+/* Status filter active colors */
+.filter-tab-status[data-status="all"].active {
+    color: var(--accent);
+    background: var(--accent-light);
 }
 
 .filter-tab-status[data-status="printing"].active {
     color: var(--accent);
+    background: var(--accent-light);
+}
+
+.filter-tab-status[data-status="paused"].active {
+    color: #f0a500;
+    background: rgba(240, 165, 0, 0.12);
+    border-color: rgba(240, 165, 0, 0.3);
 }
 
 .filter-tab-status[data-status="idle"].active {
     color: #2ec4b6;
+    background: rgba(46, 196, 182, 0.12);
+    border-color: rgba(46, 196, 182, 0.3);
 }
 
 .filter-tab-status[data-status="offline"].active {
     color: var(--text-muted);
+    background: rgba(122, 127, 138, 0.1);
+    border-color: rgba(122, 127, 138, 0.25);
 }
 
 @media (max-width: 720px) {
@@ -1862,31 +1898,120 @@ mark.proj-highlight {
     font-size: 10.5px;
     font-weight: 700;
     white-space: nowrap;
+    border: 1px solid transparent;
 }
 
 .printer-status-badge.printing {
-    background: rgba(255, 107, 0, 0.12);
+    background: var(--accent-light);
     color: var(--accent);
-    border: 1px solid rgba(255, 107, 0, 0.3);
+    border-color: rgba(255, 107, 0, 0.3);
+}
+
+/* Use theme-relative accent for printing badge */
+body.theme-cyan .printer-status-badge.printing { border-color: rgba(0,210,255,0.3); }
+body.theme-green .printer-status-badge.printing { border-color: rgba(16,185,129,0.3); }
+body.theme-purple .printer-status-badge.printing { border-color: rgba(168,85,247,0.3); }
+body.theme-light .printer-status-badge.printing { border-color: rgba(255,107,0,0.3); }
+body.theme-light-ocean .printer-status-badge.printing { background: rgba(2,132,199,0.1); color: #0284c7; border-color: rgba(2,132,199,0.3); }
+body.theme-light-sakura .printer-status-badge.printing { background: rgba(219,39,119,0.1); color: #db2777; border-color: rgba(219,39,119,0.3); }
+body.theme-light-forest .printer-status-badge.printing { background: rgba(5,150,105,0.1); color: #059669; border-color: rgba(5,150,105,0.3); }
+
+.printer-status-badge.paused {
+    background: rgba(240, 165, 0, 0.12);
+    color: #f0a500;
+    border-color: rgba(240, 165, 0, 0.35);
 }
 
 .printer-status-badge.idle {
     background: rgba(46, 196, 182, 0.12);
     color: #2ec4b6;
-    border: 1px solid rgba(46, 196, 182, 0.3);
+    border-color: rgba(46, 196, 182, 0.3);
+}
+
+/* Açık temalar için idle - koyu renk vererek okunaklı yap */
+body.theme-light .printer-status-badge.idle,
+body.theme-light-ocean .printer-status-badge.idle,
+body.theme-light-sakura .printer-status-badge.idle,
+body.theme-light-forest .printer-status-badge.idle {
+    background: rgba(46, 196, 182, 0.15);
+    color: #0d9488;
+    border-color: rgba(13, 148, 136, 0.35);
 }
 
 .printer-status-badge.offline {
-    background: rgba(122, 127, 138, 0.12);
+    background: rgba(122, 127, 138, 0.1);
     color: var(--text-muted);
-    border: 1px solid rgba(122, 127, 138, 0.3);
+    border-color: rgba(122, 127, 138, 0.25);
 }
 
 .printer-status-badge.connecting {
-    background: rgba(58, 134, 200, 0.12);
+    background: rgba(58, 134, 200, 0.1);
     color: #3a86c8;
-    border: 1px solid rgba(58, 134, 200, 0.3);
+    border-color: rgba(58, 134, 200, 0.25);
 }
+
+/* ─── PRINTER MODE BADGE (LAN / Online) ─── */
+.printer-mode-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 8px;
+    font-size: 10px;
+    font-weight: 700;
+    white-space: nowrap;
+    letter-spacing: 0.3px;
+    border: 1px solid transparent;
+    transition: opacity 0.15s, transform 0.12s;
+    user-select: none;
+}
+
+.printer-mode-badge:hover {
+    opacity: 0.8;
+    transform: translateY(-1px);
+}
+
+.printer-mode-badge.mode-lan {
+    background: rgba(46, 196, 182, 0.12);
+    color: #2ec4b6;
+    border-color: rgba(46, 196, 182, 0.3);
+}
+
+.printer-mode-badge.mode-online {
+    background: rgba(58, 134, 200, 0.1);
+    color: #3a86c8;
+    border-color: rgba(58, 134, 200, 0.25);
+}
+
+/* Açık temalar için mode badge kontrastı */
+body.theme-light .printer-mode-badge.mode-lan,
+body.theme-light-ocean .printer-mode-badge.mode-lan,
+body.theme-light-sakura .printer-mode-badge.mode-lan,
+body.theme-light-forest .printer-mode-badge.mode-lan {
+    color: #0d9488;
+    background: rgba(13, 148, 136, 0.12);
+    border-color: rgba(13, 148, 136, 0.3);
+}
+
+body.theme-light .printer-mode-badge.mode-online,
+body.theme-light-ocean .printer-mode-badge.mode-online {
+    color: #0369a1;
+    background: rgba(3, 105, 161, 0.1);
+    border-color: rgba(3, 105, 161, 0.3);
+}
+
+body.theme-light-sakura .printer-mode-badge.mode-online {
+    color: #be185d;
+    background: rgba(190, 24, 93, 0.08);
+    border-color: rgba(190, 24, 93, 0.25);
+}
+
+body.theme-light-forest .printer-mode-badge.mode-online {
+    color: #047857;
+    background: rgba(4, 120, 87, 0.1);
+    border-color: rgba(4, 120, 87, 0.3);
+}
+
 
 .printer-progress-section {
     display: flex;

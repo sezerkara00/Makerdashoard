@@ -6,7 +6,7 @@ const printersFilePath = path.join(userDataPath, 'printers.json');
 
 // ─── Theme Initialization ─────────────────────────────────────────────────────
 const settingsFilePath = path.join(userDataPath, 'settings.json');
-let appSettings = { theme: 'orange', webhookNotifications: true, soundAlerts: true, windowsNotifications: true, minimizeToTray: false };
+let appSettings = { theme: 'orange', webhookNotifications: true, soundAlerts: true, windowsNotifications: true, minimizeToTray: false, printerModeFilter: 'all', printerStatusFilter: 'all' };
 
 try {
     if (fs.existsSync(settingsFilePath)) {
@@ -67,16 +67,16 @@ function playSynthSound(type) {
 }
 
 
-window.changeTheme = function(themeName) {
+window.changeTheme = function (themeName) {
     document.body.className = `theme-${themeName}`;
-    
+
     // Update settings object and save to file
     appSettings.theme = themeName;
     saveAppSettings();
-    
+
     // Fallback to localStorage
     localStorage.setItem('app-theme', themeName);
-    
+
     // Update theme card active classes in DOM
     document.querySelectorAll('.theme-card').forEach(card => {
         const cTheme = card.getAttribute('data-theme');
@@ -162,6 +162,7 @@ const projectsView = document.getElementById('projects-view');
 const printerHostView = document.getElementById('printer-host-view');
 const printerHostWebview = document.getElementById('printer-host-webview');
 const printerHostTitle = document.getElementById('printer-host-title');
+const detailedAnalysisView = document.getElementById('detailed-analysis-view');
 const workspaceView = document.getElementById('workspace-view');
 const profileView = document.getElementById('profile-view');
 const settingsView = document.getElementById('settings-view');
@@ -173,35 +174,43 @@ function releaseAllWebcams() {
         grid.querySelectorAll('.camera-stream-img').forEach(img => {
             try {
                 img.src = 'about:blank';
-            } catch (e) {}
+            } catch (e) { }
         });
     }
 }
 
 function showDashboard() {
     releaseAllWebcams();
-    contentArea.classList.remove('hidden');
+    // Immediately hide all views first
     wikiView.classList.add('hidden');
     printersView.classList.add('hidden');
     if (projectsView) projectsView.classList.add('hidden');
     printerHostView.classList.add('hidden');
+    if (detailedAnalysisView) detailedAnalysisView.classList.add('hidden');
     if (workspaceView) workspaceView.classList.add('hidden');
     if (profileView) profileView.classList.add('hidden');
     if (settingsView) settingsView.classList.add('hidden');
     hideNotificationsView();
+
+    // Then show the target view
+    contentArea.classList.remove('hidden');
 }
 
 function showWiki() {
     releaseAllWebcams();
+    // Immediately hide all views first
     contentArea.classList.add('hidden');
-    wikiView.classList.remove('hidden');
     printersView.classList.add('hidden');
     if (projectsView) projectsView.classList.add('hidden');
     printerHostView.classList.add('hidden');
+    if (detailedAnalysisView) detailedAnalysisView.classList.add('hidden');
     if (workspaceView) workspaceView.classList.add('hidden');
     if (profileView) profileView.classList.add('hidden');
     if (settingsView) settingsView.classList.add('hidden');
     hideNotificationsView();
+
+    // Then show the target view
+    wikiView.classList.remove('hidden');
 
     // Lazy load the wiki page on first view to make startup/login navigation instant!
     if (wikiWebview && (wikiWebview.src === 'about:blank' || !wikiWebview.src || wikiWebview.getAttribute('src') === 'about:blank')) {
@@ -210,31 +219,70 @@ function showWiki() {
 }
 
 function showPrinters() {
+    // Immediately hide all views first
     contentArea.classList.add('hidden');
     wikiView.classList.add('hidden');
-    printersView.classList.remove('hidden');
     if (projectsView) projectsView.classList.add('hidden');
     printerHostView.classList.add('hidden');
+    if (detailedAnalysisView) detailedAnalysisView.classList.add('hidden');
     if (workspaceView) workspaceView.classList.add('hidden');
     if (profileView) profileView.classList.add('hidden');
     if (settingsView) settingsView.classList.add('hidden');
+
+    // Restore last used filters from saved settings
+    const savedMode = appSettings.printerModeFilter || 'all';
+    const savedStatus = appSettings.printerStatusFilter || 'all';
+    currentModeFilter = savedMode;
+    currentStatusFilter = savedStatus;
+    document.querySelectorAll('.filter-tab-mode').forEach(t => {
+        t.classList.toggle('active', t.getAttribute('data-mode') === savedMode);
+    });
+    document.querySelectorAll('.filter-tab-status').forEach(t => {
+        t.classList.toggle('active', t.getAttribute('data-status') === savedStatus);
+    });
+
+    // Then show the target view
+    printersView.classList.remove('hidden');
     hideNotificationsView();
     renderPrinters();
 }
 
-function showProjects() {
-    releaseAllWebcams();
+function showDetailedAnalysis() {
     contentArea.classList.add('hidden');
     wikiView.classList.add('hidden');
     printersView.classList.add('hidden');
-    if (projectsView) {
-        projectsView.classList.remove('hidden');
-    }
+    if (projectsView) projectsView.classList.add('hidden');
     printerHostView.classList.add('hidden');
+    if (detailedAnalysisView) detailedAnalysisView.classList.remove('hidden');
     if (workspaceView) workspaceView.classList.add('hidden');
     if (profileView) profileView.classList.add('hidden');
     if (settingsView) settingsView.classList.add('hidden');
     hideNotificationsView();
+}
+
+function closeDetailedAnalysis() {
+    if (detailedAnalysisView) detailedAnalysisView.classList.add('hidden');
+    const analysisModal = document.getElementById('analysis-results-modal');
+    if (analysisModal) analysisModal.classList.remove('hidden');
+}
+
+function showProjects() {
+    releaseAllWebcams();
+    // Immediately hide all views first
+    contentArea.classList.add('hidden');
+    wikiView.classList.add('hidden');
+    printersView.classList.add('hidden');
+    printerHostView.classList.add('hidden');
+    if (detailedAnalysisView) detailedAnalysisView.classList.add('hidden');
+    if (workspaceView) workspaceView.classList.add('hidden');
+    if (profileView) profileView.classList.add('hidden');
+    if (settingsView) settingsView.classList.add('hidden');
+    hideNotificationsView();
+
+    // Then show the target view
+    if (projectsView) {
+        projectsView.classList.remove('hidden');
+    }
 
     // Reset search/filter state
     projectSearchQuery = '';
@@ -285,14 +333,19 @@ function showProjects() {
 
 function showPrinterHost(url, printerName) {
     releaseAllWebcams();
+    // Immediately hide all views first
     contentArea.classList.add('hidden');
     wikiView.classList.add('hidden');
     printersView.classList.add('hidden');
     if (projectsView) projectsView.classList.add('hidden');
-    printerHostView.classList.remove('hidden');
+    if (detailedAnalysisView) detailedAnalysisView.classList.add('hidden');
     if (workspaceView) workspaceView.classList.add('hidden');
     if (profileView) profileView.classList.add('hidden');
+    if (settingsView) settingsView.classList.add('hidden');
     hideNotificationsView();
+
+    // Then show the target view
+    printerHostView.classList.remove('hidden');
 
     printerHostTitle.innerText = printerName + " - Arayüz";
 
@@ -305,56 +358,68 @@ function showPrinterHost(url, printerName) {
 
 function showWorkspace() {
     releaseAllWebcams();
+    // Immediately hide all views first
     contentArea.classList.add('hidden');
     wikiView.classList.add('hidden');
     printersView.classList.add('hidden');
     if (projectsView) projectsView.classList.add('hidden');
     printerHostView.classList.add('hidden');
+    if (detailedAnalysisView) detailedAnalysisView.classList.add('hidden');
+    if (profileView) profileView.classList.add('hidden');
+    if (settingsView) settingsView.classList.add('hidden');
     hideNotificationsView();
+
+    // Then show the target view
     if (workspaceView) {
         workspaceView.classList.remove('hidden');
     }
-    if (profileView) profileView.classList.add('hidden');
-    if (settingsView) settingsView.classList.add('hidden');
-    
+
     // Draw chart immediately from cache to prevent canvas distortion/stretch during network fetch
     if (window._chartJobs && typeof drawStatsChart === 'function') {
         drawStatsChart(window._chartJobs, _currentChartPeriod || '7d');
     }
-    
+
     loadWorkspaceStats();
 }
 
 function showProfile() {
     releaseAllWebcams();
+    // Immediately hide all views first
     contentArea.classList.add('hidden');
     wikiView.classList.add('hidden');
     printersView.classList.add('hidden');
     if (projectsView) projectsView.classList.add('hidden');
     printerHostView.classList.add('hidden');
-    hideNotificationsView();
+    if (detailedAnalysisView) detailedAnalysisView.classList.add('hidden');
     if (workspaceView) workspaceView.classList.add('hidden');
+    if (settingsView) settingsView.classList.add('hidden');
+    hideNotificationsView();
+
+    // Then show the target view
     if (profileView) {
         profileView.classList.remove('hidden');
     }
-    if (settingsView) settingsView.classList.add('hidden');
     updateProfileSessionTime();
 }
 
 function showSettings() {
     releaseAllWebcams();
+    // Immediately hide all views first
     contentArea.classList.add('hidden');
     wikiView.classList.add('hidden');
     printersView.classList.add('hidden');
     if (projectsView) projectsView.classList.add('hidden');
     printerHostView.classList.add('hidden');
-    hideNotificationsView();
+    if (detailedAnalysisView) detailedAnalysisView.classList.add('hidden');
     if (workspaceView) workspaceView.classList.add('hidden');
     if (profileView) profileView.classList.add('hidden');
+    hideNotificationsView();
+
+    // Then show the target view
     if (settingsView) {
         settingsView.classList.remove('hidden');
     }
-    
+
     // Update theme card active styles in settings view
     const currentTheme = appSettings.theme || 'orange';
     document.querySelectorAll('.theme-card').forEach(card => {
@@ -372,7 +437,7 @@ function showSettings() {
 
     // ─── Bildirim Toggle'larını Başlat ───────────────────────────────────────
     const webhookToggle = document.getElementById('toggle-webhook-notifs');
-    const soundToggle   = document.getElementById('toggle-sound-alerts');
+    const soundToggle = document.getElementById('toggle-sound-alerts');
     const windowsToggle = document.getElementById('toggle-windows-notifs');
 
     if (webhookToggle) {
@@ -630,6 +695,25 @@ function getPrinterFilterEmptyLabel() {
 const defaultPrinters = [];
 
 let printersState = [];
+let printerTotalDurations = {};
+let lastTotalDurationUpdate = 0;
+
+async function loadAllPrinterTotalDurations() {
+    for (const p of printersState) {
+        try {
+            const mins = await ipcRenderer.invoke('get-printer-total-duration', p.id);
+            printerTotalDurations[p.id] = mins || 0;
+        } catch (e) {
+            console.error('Failed to get total duration for printer:', p.id, e);
+        }
+    }
+    let grandTotalMins = 0;
+    printersState.forEach(p => {
+        grandTotalMins += printerTotalDurations[p.id] || 0;
+    });
+    const el = document.getElementById('stat-total-print-time');
+    if (el) el.innerText = formatDuration(grandTotalMins);
+}
 
 function getMoonrakerUrl(address, apiPath, extraQuery = '') {
     if (!address) return '';
@@ -667,7 +751,7 @@ function getMoonrakerUrl(address, apiPath, extraQuery = '') {
 
 function simulateHwStats(p) {
     const num = parseInt(p.id.replace(/\D/g, ''), 10) || 123;
-    
+
     // Initialize individually if undefined, null, 0, or NaN
     if (p.cpuUsage === undefined || p.cpuUsage === null || p.cpuUsage === 0 || isNaN(p.cpuUsage)) {
         p.cpuUsage = 8 + (num % 8);
@@ -687,7 +771,7 @@ function simulateHwStats(p) {
     // Fluctuate CPU and RAM slightly
     p.cpuUsage = Math.max(2, Math.min(95, Math.round(p.cpuUsage + (Math.random() - 0.5) * 3)));
     p.ramUsagePct = Math.max(10, Math.min(90, Math.round(p.ramUsagePct + (Math.random() - 0.5) * 1.5)));
-    
+
     // Slowly fluctuate SD Card usage very slightly
     p.sdUsagePct = Math.max(5, Math.min(99, Math.round(p.sdUsagePct + (Math.random() - 0.5) * 0.2)));
 }
@@ -744,6 +828,7 @@ function savePrinters() {
 
 // Initialize printers immediately
 loadPrinters();
+loadAllPrinterTotalDurations().then(() => renderPrinters());
 
 // ─── NOTIFICATION SYSTEM ────────────────────────────────────────────────────
 
@@ -1099,6 +1184,68 @@ if (notifClearPageBtn) {
 // Stores last known status+file per printer id so we can detect transitions
 const printerStatusSnapshot = {};
 
+function markPrintSessionCancelled(printer, file, progressPct) {
+    const snap = printerStatusSnapshot[printer.id];
+    let statsSuffix = '';
+    if (snap) {
+        const pMins = Math.round((snap.lastPrintDuration || 0) / 60);
+        const tMins = Math.round((snap.lastTotalDuration || 0) / 60);
+
+        if (snap.lastPrintDuration > 0) {
+            statsSuffix += ` - PrintTime: ${pMins} dk (${Math.round(snap.lastPrintDuration)} sn) - TotalTime: ${tMins} dk (${Math.round(snap.lastTotalDuration)} sn)`;
+        }
+    }
+    logPrinterEvent(printer, 'status', `Baskı İptal Edildi - Dosya: ${file} (%${Math.round(progressPct)})${statsSuffix}`);
+    if (snap) {
+        snap.status = 'idle';
+        snap.file = '-';
+        snap.progress = 0;
+        snap.lastLoggedProgress = -1;
+        snap.pendingNewPrint = true;
+        snap.initialized = true;
+
+        snap.lastPrintDuration = 0;
+        snap.lastTotalDuration = 0;
+    }
+}
+
+function markPrintSessionCompleted(printer, file, progressPct) {
+    const snap = printerStatusSnapshot[printer.id];
+    let statsSuffix = '';
+    if (snap) {
+        const pMins = Math.round((snap.lastPrintDuration || 0) / 60);
+        const tMins = Math.round((snap.lastTotalDuration || 0) / 60);
+
+        if (snap.lastPrintDuration > 0) {
+            statsSuffix += ` - PrintTime: ${pMins} dk (${Math.round(snap.lastPrintDuration)} sn) - TotalTime: ${tMins} dk (${Math.round(snap.lastTotalDuration)} sn)`;
+        }
+    }
+    logPrinterEvent(printer, 'status', `Baskı Tamamlandı - Dosya: ${file} (%${Math.round(progressPct)})${statsSuffix}`);
+    if (snap) {
+        snap.status = 'idle';
+        snap.file = '-';
+        snap.progress = 0;
+        snap.lastLoggedProgress = -1;
+        snap.pendingNewPrint = false;
+        snap.initialized = true;
+
+        snap.lastPrintDuration = 0;
+        snap.lastTotalDuration = 0;
+    }
+}
+
+function handlePrintStartTransition(printer, snap, prevStatus, curFile, isResume) {
+    if (isResume) {
+        addNotification('resume', 'Baskı Sürdürüldü', `${printer.name}: ${curFile}`);
+        logPrinterEvent(printer, 'status', `Baskı Sürdürüldü - Dosya: ${curFile}`);
+    } else {
+        snap.pendingNewPrint = false;
+        snap.lastLoggedProgress = -1;
+        addNotification('start', 'Baskı Başladı', `${printer.name}: ${curFile}`);
+        logPrinterEvent(printer, 'status', `Baskı Başladı - Dosya: ${curFile}`);
+    }
+}
+
 const renderTempControl = (id, heaterKey, current, target) => {
     if (current === null || current === undefined) {
         return `<span class="detail-value">-</span>`;
@@ -1391,7 +1538,7 @@ function renderPrinters() {
     grid.querySelectorAll('.camera-stream-img').forEach(img => {
         try {
             img.src = 'about:blank';
-        } catch (e) {}
+        } catch (e) { }
     });
 
     const filtered = printersState.filter(matchesPrinterFilters);
@@ -1734,7 +1881,16 @@ function renderPrinters() {
                                 </span>
                             </h4>
                             <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 4px; gap: 8px; flex-wrap: wrap;">
-                                <span class="printer-card-model">${p.model} ${p.address ? `· <span style="color: var(--accent); cursor: pointer; text-decoration: underline; font-weight: 500;" onclick="goToPrinterWebUI('${p.id}')" title="Arayüze Git (Go Host)">${p.address} ↗</span>` : ''}</span>
+                                <span class="printer-card-model">
+                                    ${p.model} ${p.address ? `· <span style="color: var(--accent); cursor: pointer; text-decoration: underline; font-weight: 500;" onclick="goToPrinterWebUI('${p.id}')" title="Arayüze Git (Go Host)">${p.address} ↗</span>` : ''}
+                                    ${printerTotalDurations[p.id] ? ` · ⏱️ ${formatDuration(printerTotalDurations[p.id])}` : ''}
+                                </span>
+                                <span class="printer-mode-badge ${isLan ? 'mode-lan' : 'mode-online'}" onclick="openEditPrinterModal('${p.id}')" title="${isLan ? 'LAN Modu - Düzenlemek için tıklayın' : 'Online Modu - Düzenlemek için tıklayın'}" style="cursor:pointer;">
+                                    ${isLan
+                    ? `<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg> LAN`
+                    : `<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg> Online`
+                }
+                                </span>
                             </div>
                         </div>
                         <span class="printer-status-badge ${badgeClass}" style="margin-left: 10px;">
@@ -1765,6 +1921,13 @@ function renderPrinters() {
     document.getElementById('stat-active-printers').innerText = activePrinters;
     document.getElementById('stat-idle-printers').innerText = idlePrinters;
     document.getElementById('stat-offline-printers').innerText = offlinePrinters;
+
+    let grandTotalMins = 0;
+    printersState.forEach(p => {
+        grandTotalMins += printerTotalDurations[p.id] || 0;
+    });
+    const totalTimeEl = document.getElementById('stat-total-print-time');
+    if (totalTimeEl) totalTimeEl.innerText = formatDuration(grandTotalMins);
 
     // Restore active element focus and selection
     if (activeId) {
@@ -2014,6 +2177,7 @@ window.stopPrinter = async function (id) {
             // 2. Send cancel command to real Klipper
             const success = await sendKlipperPrintControl(p, 'cancel');
             if (success) {
+                markPrintSessionCancelled(p, cancelledFile, p.progress || 0);
                 p.status = 'idle';
                 p.progress = 0;
                 p.remainingTime = '-';
@@ -2027,6 +2191,7 @@ window.stopPrinter = async function (id) {
             }
         } else {
             // Mock simulation fallback
+            markPrintSessionCancelled(p, cancelledFile, p.progress || 0);
             p.status = 'idle';
             p.progress = 0;
             p.remainingTime = '-';
@@ -2302,7 +2467,7 @@ window.analyzeLanLogs = async function (id, silent = false) {
     if (!silent) {
         const startAnalysis = await showCustomConfirm(
             'Log Analizi',
-            `'${p.name}' yazıcısının hostundaki tüm log dosyaları (.log ve arşivlenen geçmiş loglar) indirilip analiz edilecek ve yerel klasörüne rapor dosyaları olarak kaydedilecektir.\n\nDevam etmek istiyor musunuz?`,
+            `'${p.name}' yazıcısının hostundaki tüm log dosyaları (.log ve arşivlenen geçmiş loglar) indirilip analiz edilecek ve yerel veritabanına kaydedilecektir.\n\nDevam etmek istiyor musunuz?`,
             'Analizi Başlat',
             'Vazgeç',
             'info'
@@ -2311,34 +2476,34 @@ window.analyzeLanLogs = async function (id, silent = false) {
 
         addNotification('start', 'Log Analizi Başladı', `${p.name} logları analiz ediliyor...`);
     }
-    
+
     const loadingModal = document.getElementById('analysis-loading-modal');
     const loadingText = document.getElementById('analysis-loading-text');
-    
+
     if (loadingModal && !silent) {
         if (loadingText) {
             loadingText.innerText = `'${p.name}' yazıcısından log dosyaları çekiliyor ve analiz ediliyor... Lütfen bekleyin.`;
         }
         loadingModal.classList.remove('hidden');
     }
-    
+
     try {
         const res = await ipcRenderer.invoke('printer-sync-logs', p);
-        
+
         if (!silent) {
             if (loadingModal) {
                 loadingModal.classList.add('hidden');
             }
-            
+
             if (res && res.success) {
                 addNotification(
-                    'complete', 
-                    'Log Analizi Tamamlandı', 
+                    'complete',
+                    'Log Analizi Tamamlandı',
                     `${p.name}: ${res.processedCount} log dosyası tarandı. Toplam ${res.totalErrorsDetected} kritik hata tespit edildi.`
                 );
                 await showCustomConfirm(
                     'Analiz Tamamlandı',
-                    `Başarıyla tamamlandı!\n\n${res.processedCount} adet log dosyası işlendi.\nToplam ${res.totalErrorsDetected} adet kritik hata yerel dizindeki analiz dosyalarına (*.analysis.txt) kaydedildi.`,
+                    `Başarıyla tamamlandı!\n\n${res.processedCount} adet log dosyası işlendi.\nToplam ${res.totalErrorsDetected} adet kritik hata yerel veritabanına kaydedildi.`,
                     'Tamam',
                     null,
                     'success'
@@ -2363,13 +2528,13 @@ window.analyzeLanLogs = async function (id, silent = false) {
     }
 };
 
-window.toggleAnalysisCard = function(headerElement) {
+window.toggleAnalysisCard = function (headerElement) {
     const card = headerElement.closest('.analysis-run-card');
     if (!card) return;
     const body = card.querySelector('.analysis-run-card-body');
     if (!body) return;
     const chevron = card.querySelector('.analysis-chevron');
-    
+
     const isCollapsed = card.classList.contains('collapsed');
     if (isCollapsed) {
         card.classList.remove('collapsed');
@@ -2382,9 +2547,458 @@ window.toggleAnalysisCard = function(headerElement) {
     }
 };
 
-window.showAnalysisResults = function(id) {
+window.toggleErrorDetail = function (rowElement) {
+    const nextRow = rowElement.nextElementSibling;
+    if (nextRow && nextRow.classList.contains('error-detail-row')) {
+        if (nextRow.style.display === 'none') {
+            nextRow.style.display = 'table-row';
+            nextRow.classList.remove('hidden');
+            rowElement.classList.add('expanded');
+            rowElement.style.background = 'rgba(239, 71, 111, 0.04)'; // Soft crimson highlight for the parent row
+        } else {
+            nextRow.style.display = 'none';
+            nextRow.classList.add('hidden');
+            rowElement.classList.remove('expanded');
+            rowElement.style.background = rowElement.dataset.originalBg || 'transparent';
+        }
+    }
+};
+
+function parseTrLogDate(timeStr) {
+    if (!timeStr) return null;
+    const cleanStr = timeStr.trim();
+
+    // 1. Format: DD.MM.YYYY HH:MM:SS
+    const parts = cleanStr.split(/\s+/);
+    if (parts.length >= 2) {
+        const dateParts = parts[0].split('.');
+        const timeParts = parts[1].split(':');
+        if (dateParts.length === 3 && timeParts.length >= 2) {
+            const d = parseInt(dateParts[0], 10);
+            const m = parseInt(dateParts[1], 10);
+            const y = parseInt(dateParts[2], 10);
+            const h = parseInt(timeParts[0], 10) || 0;
+            const min = parseInt(timeParts[1], 10) || 0;
+            const s = parseInt(timeParts[2], 10) || 0;
+            if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
+                return new Date(y, m - 1, d, h, min, s);
+            }
+        }
+    }
+
+    // 2. Format: HH:MM:SS (fallback to today)
+    const timeParts = cleanStr.split(':');
+    if (timeParts.length >= 2 && timeParts.length <= 3) {
+        const h = parseInt(timeParts[0], 10);
+        const min = parseInt(timeParts[1], 10);
+        const s = parseInt(timeParts[2], 10) || 0;
+        if (!isNaN(h) && !isNaN(min)) {
+            const now = new Date();
+            return new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, min, s);
+        }
+    }
+
+    return null;
+}
+
+function formatDuration(totalMins) {
+    if (isNaN(totalMins) || totalMins < 0) return '0 dk';
+    const hours = Math.floor(totalMins / 60);
+    const mins = totalMins % 60;
+    if (hours > 0) {
+        return `${hours} sa ${mins} dk`;
+    }
+    return `${mins} dk`;
+}
+
+function getPrintSessionMinutes(session) {
+    // 1. Try to find duration from session events
+    for (const evt of session.events) {
+        const text = evt.text || '';
+        const match = text.match(/Süre:\s*(\d+)\s*dk/i);
+        if (match) {
+            return parseInt(match[1], 10);
+        }
+    }
+
+    // 2. Fallback to calculation from startTime and endTime/lastEventTime
+    const startStr = session.startTime;
+    const endStr = session.endTime || (session.events.length > 0 ? extractAnalysisTime(session.events[session.events.length - 1].text) : null);
+
+    if (!startStr || !endStr) return 0;
+
+    const startDate = parseTrLogDate(startStr);
+    const endDate = parseTrLogDate(endStr);
+
+    if (!startDate || !endDate) return 0;
+
+    const diffMs = endDate - startDate;
+    if (diffMs < 0) return 0;
+
+    return Math.round(diffMs / 60000);
+}
+
+function getPrintSessionDuration(session) {
+    if (session.duration) return session.duration;
+    const mins = getPrintSessionMinutes(session);
+    return mins > 0 ? formatDuration(mins) : null;
+}
+
+function getPrintSessionPeaks(session) {
+    if (session.peaksText) return session.peaksText;
+    for (const evt of session.events) {
+        const text = evt.text || '';
+        const match = text.match(/Peak Sıcaklıklar:\s*\[(.*?)\]/i);
+        if (match) {
+            return match[1].trim();
+        }
+    }
+    return null;
+}
+
+window.toggleSessionTimeDetail = function (el) {
+    const state = el.getAttribute('data-state');
+    if (state === 'duration') {
+        el.innerHTML = el.getAttribute('data-original');
+        el.setAttribute('data-state', 'original');
+        el.style.color = '';
+    } else {
+        el.innerHTML = el.getAttribute('data-duration');
+        el.setAttribute('data-state', 'duration');
+        el.style.color = 'var(--text-main)';
+    }
+};
+
+function extractAnalysisTime(text) {
+    const bracket = text.match(/^\[([^\]]+)\]/);
+    if (bracket) return bracket[1];
+    const tail = text.match(/:\s*(\d{2}\.\d{2}\.\d{4}\s+\d{2}:\d{2}:\d{2})\s*$/);
+    return tail ? tail[1] : '';
+}
+
+function extractAnalysisFile(text) {
+    const paren = text.match(/\(([^)]+)\)\s*:/);
+    if (paren) return paren[1].trim();
+    const dosya = text.match(/Dosya:\s*(.+?)(?:\s*\(|$)/i);
+    if (dosya) return dosya[1].trim();
+    const progDosya = text.match(/Dosya:\s*([^|]+)/i);
+    if (progDosya) return progDosya[1].trim();
+    return 'Bilinmeyen dosya';
+}
+
+function buildPrintSessions(baskiRaporu) {
+    // Sort all events chronologically by their timestamps
+    const chronological = [...baskiRaporu].sort((a, b) => {
+        const timeA = extractAnalysisTime(a.text);
+        const timeB = extractAnalysisTime(b.text);
+        if (!timeA) return 1;
+        if (!timeB) return -1;
+        const dateA = parseTrLogDate(timeA);
+        const dateB = parseTrLogDate(timeB);
+        if (!dateA) return 1;
+        if (!dateB) return -1;
+        return dateA - dateB;
+    });
+
+    const sessions = [];
+    let current = null;
+
+    const closeSession = () => { current = null; };
+
+    const startSession = (file, time, item, hasExplicitStart = false) => {
+        // Prevent duplicate sessions with the exact same startTime
+        const existing = sessions.find(s => s.startTime === time && s.file === (file || 'Bilinmeyen dosya'));
+        if (existing) {
+            current = existing;
+            return;
+        }
+        current = {
+            file: file || 'Bilinmeyen dosya',
+            status: 'printing',
+            startTime: time,
+            endTime: null,
+            lastProgress: null,
+            hasExplicitStart,   // true only when a real 'Baskı Başladı' event started this session
+            events: [item]
+        };
+        sessions.push(current);
+    };
+
+    for (const item of chronological) {
+        const text = item.text || '';
+        const time = extractAnalysisTime(text);
+        const file = extractAnalysisFile(text);
+
+        if (item.type === 'start' || /Baskı Başladı/i.test(text)) {
+            closeSession();
+            startSession(file, time, item, true);
+            continue;
+        }
+
+        if (item.type === 'pause' || /Baskı Duraklatıldı/i.test(text)) {
+            if (!current) startSession(file, time, item);
+            current.status = 'paused';
+            if (file && file !== 'Bilinmeyen dosya') current.file = file;
+            current.events.push(item);
+            continue;
+        }
+
+        if (item.type === 'resume' || /Baskı Sürdürüldü/i.test(text)) {
+            if (!current) startSession(file, time, item);
+            current.status = 'printing';
+            current.events.push(item);
+            continue;
+        }
+
+        if (item.type === 'success' || /Baskı Bitti/i.test(text) || /Baskı Tamamlandı/i.test(text)) {
+            if (!current) startSession(file, time, item);
+            current.status = 'completed';
+            current.endTime = time;
+            current.events.push(item);
+            closeSession();
+            continue;
+        }
+
+        if (item.type === 'cancel' || /Baskı İptal/i.test(text)) {
+            if (!current) startSession(file, time, item);
+            current.status = 'cancelled';
+            current.endTime = time;
+            current.events.push(item);
+            closeSession();
+            continue;
+        }
+
+        if (item.type === 'progress' || text.includes('[PROGRESS]') || text.includes('Yazdırılıyor:')) {
+            const progMatch = text.match(/%(\d+)/);
+            const newProg = progMatch ? parseInt(progMatch[1], 10) : null;
+
+            // Only close on progress regression if this was an orphaned progress-only session.
+            // If a real 'Baskı Başladı' started this session, keep it open — the same print
+            // can report progress fluctuations or re-reports from multiple log files.
+            if (current && newProg !== null && current.lastProgress !== null &&
+                newProg < current.lastProgress && !current.hasExplicitStart) {
+                closeSession();
+            }
+
+            if (!current) {
+                startSession(file !== 'Bilinmeyen dosya' ? file : 'Bilinmeyen dosya', time, item);
+            }
+
+            if (newProg !== null) current.lastProgress = newProg;
+            if (current.status !== 'paused') current.status = 'printing';
+            if (file && file !== 'Bilinmeyen dosya') current.file = file;
+
+            // Replace existing progress event instead of appending
+            const progIdx = current.events.findIndex(e => {
+                const t = e.text || '';
+                return t.includes('[PROGRESS]') || t.includes('Yazdırılıyor:');
+            });
+            if (progIdx >= 0) current.events[progIdx] = item;
+            else current.events.push(item);
+        }
+    }
+
+    // Filter sessions to only keep real print sessions (must contain a start, success, cancel, or error event)
+    const filteredSessions = sessions.filter(session => {
+        return session.events.some(evt => {
+            const t = (evt.text || '').toLowerCase();
+            return evt.type === 'start' ||
+                evt.type === 'success' ||
+                evt.type === 'cancel' ||
+                evt.type === 'error' ||
+                t.includes('baskı başladı') ||
+                t.includes('baskı bitti') ||
+                t.includes('baskı tamamlandı') ||
+                t.includes('baskı iptal');
+        });
+    });
+
+    return filteredSessions.reverse();
+}
+
+function getPrintSessionMeta(status) {
+    const map = {
+        printing: { label: 'Yazdırılıyor', color: '#ff6b00', bg: 'rgba(255, 107, 0, 0.12)', icon: '🖨️' },
+        paused: { label: 'Duraklatıldı', color: '#ffc107', bg: 'rgba(255, 193, 7, 0.12)', icon: '⏸️' },
+        completed: { label: 'Bitti', color: '#2ec4b6', bg: 'rgba(46, 196, 182, 0.12)', icon: '✅' },
+        cancelled: { label: 'İptal Edildi', color: '#ef476f', bg: 'rgba(239, 71, 111, 0.12)', icon: '❌' }
+    };
+    return map[status] || map.printing;
+}
+
+function renderPrintSessionsHtml(sessions, page = 1, perPage = 10) {
+    if (!sessions.length) {
+        return {
+            html: `<span style="font-size: 12px; color: var(--text-muted);">Herhangi bir baskı oturumu bulunmuyor.</span>`,
+            totalPages: 1,
+            safePage: 1,
+            totalItems: 0,
+            rangeStart: 0,
+            rangeEnd: 0
+        };
+    }
+
+    const styleHtml = `
+        <style>
+            details.session-timeline-details[open] .timeline-summary-chevron {
+                transform: rotate(90deg);
+            }
+            details.session-timeline-details summary::-webkit-details-marker {
+                display: none;
+            }
+            details.session-timeline-details summary {
+                list-style: none;
+            }
+
+            details.print-session-details {
+                flex-shrink: 0;
+            }
+            details.print-session-details[open] .print-session-chevron {
+                transform: rotate(90deg);
+            }
+            details.print-session-details summary::-webkit-details-marker {
+                display: none;
+            }
+            details.print-session-details summary {
+                list-style: none;
+            }
+        </style>
+    `;
+
+    const totalItems = sessions.length;
+    const totalPages = Math.max(1, Math.ceil(totalItems / perPage));
+    const safePage = Math.min(Math.max(1, page), totalPages);
+    const offset = (safePage - 1) * perPage;
+    const pageSessions = sessions.slice(offset, offset + perPage);
+    const globalOffset = offset;
+
+    const html = pageSessions.map((session, idx) => {
+        const globalIdx = globalOffset + idx;
+        const meta = getPrintSessionMeta(session.status);
+        const progressText = session.lastProgress !== null ? `%${session.lastProgress}` : '-';
+        const timeText = session.endTime || session.startTime || '-';
+        const shortFile = session.file.length > 52 ? session.file.substring(0, 50) + '…' : session.file;
+        const durationText = getPrintSessionDuration(session) || 'Bilinmeyen süre';
+        const startTimeText = session.startTime || '-';
+
+        const originalTimeHtml = `<strong>Son işlem:</strong> ${timeText}`;
+        const durationTimeHtml = `<strong>Süre:</strong> <span style="color: var(--accent); font-weight: 700;">${durationText}</span> <span style="font-size: 10px; color: var(--text-muted); font-weight: normal;">(Başlangıç: ${startTimeText})</span>`;
+
+        const timeline = session.events
+            .filter(e => {
+                const t = e.text || '';
+                if (e.type === 'progress' || t.includes('[PROGRESS]') || t.includes('Yazdırılıyor:')) {
+                    return false;
+                }
+                return e.type !== 'info';
+            })
+            .map(e => {
+                let icon = '•';
+                const t = e.text || '';
+                if (e.type === 'start' || /Başladı/i.test(t)) icon = '🚀';
+                else if (e.type === 'pause' || /Duraklatıldı/i.test(t)) icon = '⏸️';
+                else if (e.type === 'resume' || /Sürdürüldü/i.test(t)) icon = '▶️';
+                else if (e.type === 'success' || /Bitti|Tamamlandı/i.test(t)) icon = '✅';
+                else if (e.type === 'cancel' || /İptal/i.test(t)) icon = '❌';
+                else if (t.includes('[PROGRESS]') || t.includes('Yazdırılıyor:')) icon = '📊';
+                const display = t.replace(/^\[[^\]]+\]\s*/, '');
+                return `<div style="font-size: 11px; color: var(--text-muted); line-height: 1.45;">${icon} ${display}</div>`;
+            }).join('');
+
+        const timelineHtml = (session.status === 'cancelled' && timeline)
+            ? `
+                <details class="session-timeline-details" style="cursor: pointer; outline: none; margin-top: 6px; border-top: 1px solid var(--border-light); padding-top: 6px;">
+                    <summary class="session-timeline-summary" style="font-size: 10.5px; font-weight: 700; color: #ef476f; user-select: none; display: flex; align-items: center; gap: 4px; outline: none;">
+                        <svg class="timeline-summary-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="transition: transform 0.15s; margin-right: 2px;">
+                            <polyline points="9 18 15 12 9 6"></polyline>
+                        </svg>
+                        Olay Geçmişini Göster
+                    </summary>
+                    <div style="margin-top: 6px; display: flex; flex-direction: column; gap: 4.5px; cursor: default; padding-left: 12px; border-left: 1px solid rgba(255, 255, 255, 0.05);" onclick="event.stopPropagation();">
+                        ${timeline}
+                    </div>
+                </details>
+              `
+            : (timeline ? `<div style="border-top: 1px solid var(--border-light); padding-top: 6px; display: flex; flex-direction: column; gap: 3px;">${timeline}</div>` : '');
+
+        const isOpen = session.status === 'printing' || session.status === 'paused';
+        const peaksText = getPrintSessionPeaks(session);
+        const peaksHtml = peaksText ? `<span style="color: #ffc107;"><strong>Zirve:</strong> ${peaksText}</span>` : '';
+
+        return `
+            <details class="print-session-details" ${isOpen ? 'open' : ''} style="background: var(--surface-2); border: 1px solid var(--border-light); border-left: 3px solid ${meta.color}; border-radius: 8px; margin-bottom: 8px; outline: none; display: block; overflow: hidden; box-shadow: var(--shadow-xs); flex-shrink: 0;">
+                <summary style="display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 12px; cursor: pointer; list-style: none; outline: none; user-select: none;">
+                    <div style="display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1;">
+                        <svg class="print-session-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="transition: transform 0.2s; color: var(--text-muted); flex-shrink: 0;">
+                            <polyline points="9 18 15 12 9 6"></polyline>
+                        </svg>
+                        <div style="min-width: 0; flex: 1;">
+                            <div style="font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 2px;">Baskı #${totalItems - globalIdx}</div>
+                            <div style="font-size: 12px; font-weight: 600; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${session.file}">${shortFile}</div>
+                        </div>
+                    </div>
+                    <span style="flex-shrink: 0; font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 999px; color: ${meta.color}; background: ${meta.bg}; border: 1px solid ${meta.color}33; white-space: nowrap;">${meta.icon} ${meta.label}</span>
+                </summary>
+                <div style="padding: 0 12px 12px 12px; border-top: 1px solid var(--border-light); padding-top: 8px; display: flex; flex-direction: column; gap: 8px;" onclick="event.stopPropagation();">
+                    <div style="display: flex; gap: 14px; font-size: 11px; color: var(--text-light); margin-bottom: ${timeline ? '8px' : '0'}; flex-wrap: wrap; align-items: center;">
+                        <span><strong>İlerleme:</strong> ${progressText}</span>
+                        <span class="session-time-toggle" style="cursor: pointer; user-select: none; border-bottom: 1px dashed rgba(255, 255, 255, 0.35); padding-bottom: 1px; transition: color 0.15s;" 
+                              data-original="${originalTimeHtml.replace(/"/g, '&quot;')}" 
+                              data-duration="${durationTimeHtml.replace(/"/g, '&quot;')}" 
+                              data-state="original" 
+                              onclick="toggleSessionTimeDetail(this)">
+                            <strong>Son işlem:</strong> ${timeText}
+                        </span>
+                        ${peaksHtml ? `<span>${peaksHtml}</span>` : ''}
+                    </div>
+                    ${timelineHtml}
+                </div>
+            </details>
+        `;
+    }).join('');
+
+    return {
+        html: styleHtml + html,
+        totalPages,
+        safePage,
+        totalItems,
+        rangeStart: totalItems > 0 ? offset + 1 : 0,
+        rangeEnd: Math.min(offset + perPage, totalItems)
+    };
+}
+
+const ANALYSIS_FILES_PER_PAGE = 5;
+const ANALYSIS_SESSIONS_PER_PAGE = 10;
+const analysisViewState = { filesPage: 1, sessionPages: {}, printerId: null };
+
+function renderAnalysisPaginationBar(scope, currentPage, totalPages, metaText) {
+    if (totalPages <= 1) return '';
+    const prevDisabled = currentPage <= 1;
+    const nextDisabled = currentPage >= totalPages;
+    return `
+        <div class="analysis-pagination-bar" data-analysis-scope="${scope}" style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 10px; padding: 8px 10px; background: var(--surface-2); border-radius: 8px; border: 1px solid var(--border-light); flex-wrap: wrap;">
+            <button type="button" class="btn-secondary" data-analysis-scope="${scope}" data-analysis-page="prev" ${prevDisabled ? 'disabled' : ''} style="padding: 4px 10px; font-size: 11px; height: 28px; margin: 0; width: auto; opacity: ${prevDisabled ? 0.45 : 1}; cursor: ${prevDisabled ? 'not-allowed' : 'pointer'};">← Önceki</button>
+            <span style="font-size: 11.5px; font-weight: 600; color: var(--text-light); text-align: center;">${metaText}</span>
+            <button type="button" class="btn-secondary" data-analysis-scope="${scope}" data-analysis-page="next" ${nextDisabled ? 'disabled' : ''} style="padding: 4px 10px; font-size: 11px; height: 28px; margin: 0; width: auto; opacity: ${nextDisabled ? 0.45 : 1}; cursor: ${nextDisabled ? 'not-allowed' : 'pointer'};">Sonraki →</button>
+        </div>
+    `;
+}
+
+function escapeAnalysisScopeKey(value) {
+    return String(value).replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
+window.showAnalysisResults = async function (id) {
+    let rawTextContent = '';
     const p = printersState.find(x => x.id === id);
-    if (!p) return;
+    if (!p) {
+        console.error('[Analysis] Printer not found with ID:', id);
+        console.error('[Analysis] Available printers:', printersState.map(x => ({ id: x.id, name: x.name })));
+        showCustomConfirm('Hata', 'Yazıcı bulunamadı. Lütfen sayfayı yenileyin.', 'Tamam', null, 'error');
+        return;
+    }
+
+    console.log('[Analysis] Opening modal for printer:', p.name, 'ID:', id);
 
     if (!p.logFolderPath) {
         showCustomConfirm('Hata', 'Bu yazıcının log kayıt yolu tanımlanmamış. Lütfen ayarlardan düzenleyin.', 'Tamam', null, 'error');
@@ -2396,7 +3010,6 @@ window.showAnalysisResults = function(id) {
         showCustomConfirm('Hata', 'Bu yazıcının log kayıt yolu tanımlanmamış. Lütfen ayarlardan düzenleyin.', 'Tamam', null, 'error');
         return;
     }
-    const analysisFilePath = path.join(printerFolder, 'printer_analysis.txt');
 
     const modal = document.getElementById('analysis-results-modal');
     const titleEl = document.getElementById('analysis-results-title');
@@ -2406,8 +3019,38 @@ window.showAnalysisResults = function(id) {
     const tabStructured = document.getElementById('analysis-tab-structured');
     const tabRaw = document.getElementById('analysis-tab-raw');
 
-    titleEl.innerText = `${p.name} - Log Analiz Raporu`;
-    pathEl.innerText = analysisFilePath;
+    // Clear previous content immediately when switching printers
+    titleEl.innerText = `${p.name || 'Bilinmiyor'} - Log Analiz Raporu`;
+
+    // Fetch and display total printing duration asynchronously
+    ipcRenderer.invoke('get-printer-total-duration', id).then(totalMins => {
+        const totalDurationText = formatDuration(totalMins);
+        titleEl.innerText = `${p.name || 'Bilinmiyor'} - Log Analiz Raporu (Toplam Baskı Süresi: ${totalDurationText})`;
+    }).catch(err => {
+        console.error('[Analysis] Failed to load total print duration:', err);
+    });
+    pathEl.innerText = 'Yerel Veritabanı';
+    preEl.innerText = '';
+    structuredDiv.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 30px;">Yükleniyor...</div>';
+    tabStructured.classList.add('active');
+    tabRaw.classList.remove('active');
+    preEl.classList.add('hidden');
+    structuredDiv.classList.remove('hidden');
+
+    console.log('[Analysis] Loaded printer data:', {
+        printerId: id,
+        printerName: p.name,
+        printerFolder
+    });
+
+    if (analysisViewState.printerId !== id) {
+        analysisViewState.printerId = id;
+        analysisViewState.filesPage = 1;
+        analysisViewState.filterVal = 'all';
+        analysisViewState.customStartDate = '';
+        analysisViewState.customEndDate = '';
+        Object.keys(analysisViewState.sessionPages).forEach(k => delete analysisViewState.sessionPages[k]);
+    }
 
     // Tab switching event listeners
     tabStructured.onclick = () => {
@@ -2422,160 +3065,132 @@ window.showAnalysisResults = function(id) {
         tabStructured.classList.remove('active');
         preEl.classList.remove('hidden');
         structuredDiv.classList.add('hidden');
+
+        // Lazy load the raw logs text to prevent UI freezing/crashing on large files
+        if (preEl.innerText === '' && rawTextContent) {
+            preEl.innerText = rawTextContent;
+            setTimeout(() => {
+                preEl.scrollTop = preEl.scrollHeight;
+            }, 50);
+        }
     };
 
     // Default to the structured tab
     tabStructured.click();
 
-    function parseAnalysisReport(text) {
-        const runMarker = /={50,}\s*📊 LOG KAYITLARI SENKRONİZASYON VE ANALİZİ - DOSYA: ([^\n]+)\s*={50,}/g;
-        const runs = [];
-        let match;
-        const matches = [];
-        while ((match = runMarker.exec(text)) !== null) {
-            matches.push({
-                fileName: match[1].trim(),
-                index: match.index,
-                length: match[0].length
-            });
-        }
-        
-        for (let i = 0; i < matches.length; i++) {
-            const start = matches[i].index + matches[i].length;
-            const end = (i + 1 < matches.length) ? matches[i + 1].index : text.length;
-            const content = text.substring(start, end);
-            runs.push({
-                fileName: matches[i].fileName,
-                content: content
-            });
-        }
-        
-        // Deduplicate runs by fileName (keep the last one to show the latest analysis)
-        const uniqueRunsMap = new Map();
-        runs.forEach(run => uniqueRunsMap.set(run.fileName, run));
-        let uniqueRuns = Array.from(uniqueRunsMap.values());
-        uniqueRuns.sort((a, b) => {
-            if (a.fileName === 'printer_logs.txt') return -1;
-            if (b.fileName === 'printer_logs.txt') return 1;
-            return 0;
-        });
-        
-        if (uniqueRuns.length === 0 && text.trim().length > 0) {
-            uniqueRuns.push({
-                fileName: "Genel Analiz Raporu",
-                content: text
-            });
-        }
-        
-        return uniqueRuns.map(run => {
-            const sections = {
-                serverLogs: [],
-                baskiRaporu: [],
-                maxTemps: [],
-                summary: { success: 0, cancelled: 0, errors: 0 },
-                errors: []
-            };
-            
-            const serverLogRegex = /📡 \[SERVER LOG\] OUTGOING EVENT: ([^\n]+)[\s-]*(\{[\s\S]*?\})[\s-]*/g;
-            let sMatch;
-            while ((sMatch = serverLogRegex.exec(run.content)) !== null) {
-                try {
-                    sections.serverLogs.push({
-                        type: sMatch[1].trim(),
-                        payload: JSON.parse(sMatch[2])
-                    });
-                } catch (e) {
-                    sections.serverLogs.push({
-                        type: sMatch[1].trim(),
-                        raw: sMatch[2]
-                    });
-                }
-            }
-            
-            const baskiRaporuMatch = run.content.match(/=== MAKERDASHBOARD GERÇEK BASKI RAPORU ===([\s\S]*?)===/);
-            if (baskiRaporuMatch) {
-                const lines = baskiRaporuMatch[1].trim().split('\n');
-                lines.forEach(line => {
-                    if (line.includes('🚀 Baskı Başladı')) {
-                        sections.baskiRaporu.push({ type: 'start', text: line.replace('🚀', '').trim() });
-                    } else if (line.includes('✅ Baskı Bitti')) {
-                        sections.baskiRaporu.push({ type: 'success', text: line.replace('✅', '').trim() });
-                    } else if (line.includes('❌ Baskı İptal')) {
-                        sections.baskiRaporu.push({ type: 'cancel', text: line.replace('❌', '').trim() });
-                    } else if (line.includes('[PROGRESS]')) {
-                        sections.baskiRaporu.push({ type: 'info', text: line.trim() });
-                    } else if (line.trim() && !line.includes('Log Başlangıcı') && !line.includes('Log periyodunda')) {
-                        sections.baskiRaporu.push({ type: 'info', text: line.trim() });
-                    }
-                });
-            }
-            
-            const maxTempsMatch = run.content.match(/=== BASKI ESNASINDA ÖLÇÜLEN MAKSIMUM GERÇEK SICAKLIKLAR ===([\s\S]*?)===/);
-            if (maxTempsMatch) {
-                const lines = maxTempsMatch[1].trim().split('\n');
-                lines.forEach(line => {
-                    const parts = line.split(':');
-                    if (parts.length >= 2) {
-                        sections.maxTemps.push({
-                            sensor: parts[0].trim(),
-                            value: parts[1].replace('°C', '').trim() + ' °C'
-                        });
-                    }
-                });
-            }
-            
-            const summaryMatch = run.content.match(/\[GENEL ÖZET\] Gerçek Başarılı:\s*(\d+)\s*\|\s*Gerçek İptal:\s*(\d+)\s*\|\s*Yakalanan Hatalar:\s*(\d+)/);
-            if (summaryMatch) {
-                sections.summary = {
-                    success: parseInt(summaryMatch[1], 10),
-                    cancelled: parseInt(summaryMatch[2], 10),
-                    errors: parseInt(summaryMatch[3], 10)
-                };
-            }
-            
-            const errorsMatch = run.content.match(/\[YAKALANAN TÜM KRİTİK HATALARIN LİSTESİ\][\s\S]*?\+[-+]+\+[\s\S]*?\+[-+]+\+([\s\S]*?)\+[-+]+\+/);
-            if (errorsMatch) {
-                const lines = errorsMatch[1].trim().split('\n');
-                lines.forEach(line => {
-                    if (line.startsWith('|')) {
-                        const parts = line.split('|').map(p => p.trim());
-                        if (parts.length >= 5) {
-                            sections.errors.push({
-                                time: parts[1],
-                                code: parts[2],
-                                title: parts[3],
-                                desc: parts[4]
-                            });
-                        }
-                    }
-                });
-            }
-            
-            return {
-                fileName: run.fileName,
-                sections: sections
-            };
-        });
-    }
-
-    function renderStructuredReport(runs) {
+    function renderStructuredReport(runs, printerStats) {
         if (runs.length === 0) {
             structuredDiv.innerHTML = `<div style="text-align: center; color: var(--text-muted); padding: 30px;">Gösterilecek analiz verisi bulunamadı.</div>`;
             return;
+        }
+
+        let totalSuccess = 0;
+        let totalCancelled = 0;
+        let totalErrors = 0;
+
+        runs.forEach(run => {
+            totalSuccess += run.sections.summary.success || 0;
+            totalCancelled += run.sections.summary.cancelled || 0;
+            totalErrors += run.sections.summary.errors || 0;
+        });
+
+        const localTotalMins = printerTotalDurations[id] || 0;
+        const formattedTotalDuration = formatDuration(localTotalMins);
+
+        const statsTitleHtml = `<h3 style="font-size: 13px; font-weight: 700; color: var(--text-main, #fff); margin: 0 0 12px 0; display: flex; align-items: center; gap: 8px; text-transform: uppercase; letter-spacing: 0.5px; opacity: 0.9;">📊 Detaylı Baskı İstatistikleri</h3>`;
+
+        const statsGridHtml = `
+            <div class="analysis-stats-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 20px;">
+                <div class="analysis-stat-card" style="background: var(--surface-2, rgba(255, 255, 255, 0.02)); border: 1px solid var(--border, rgba(255, 255, 255, 0.08)); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 6px; transition: all 0.3s ease; box-shadow: 0 4px 20px rgba(0,0,0,0.15);">
+                    <span style="font-size: 10px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">📦 Toplam Baskı Sayısı</span>
+                    <strong style="font-size: 18px; color: var(--text-main, #fff); font-family: 'Outfit', sans-serif;">${printerStats ? printerStats.totalPrintJobs : 0}</strong>
+                </div>
+                <div class="analysis-stat-card" style="background: var(--surface-2, rgba(255, 255, 255, 0.02)); border: 1px solid var(--border, rgba(255, 255, 255, 0.08)); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 6px; transition: all 0.3s ease; box-shadow: 0 4px 20px rgba(0,0,0,0.15);">
+                    <span style="font-size: 10px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">🏆 En Uzun Baskı</span>
+                    <strong style="font-size: 18px; color: var(--accent); font-family: 'Outfit', sans-serif;">${printerStats ? printerStats.longestJob : '0sn'}</strong>
+                </div>
+                <div class="analysis-stat-card" style="background: var(--surface-2, rgba(255, 255, 255, 0.02)); border: 1px solid var(--border, rgba(255, 255, 255, 0.08)); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 6px; transition: all 0.3s ease; box-shadow: 0 4px 20px rgba(0,0,0,0.15);">
+                    <span style="font-size: 10px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">⏱️ Toplam Çalışma</span>
+                    <strong style="font-size: 18px; color: #2ec4b6; font-family: 'Outfit', sans-serif;">${printerStats ? printerStats.totalTime : '0sn'}</strong>
+                </div>
+                <div class="analysis-stat-card" style="background: var(--surface-2, rgba(255, 255, 255, 0.02)); border: 1px solid var(--border, rgba(255, 255, 255, 0.08)); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 6px; transition: all 0.3s ease; box-shadow: 0 4px 20px rgba(0,0,0,0.15);">
+                    <span style="font-size: 10px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">⚡ Net Baskı Süresi</span>
+                    <strong style="font-size: 18px; color: #ffbc42; font-family: 'Outfit', sans-serif;">${printerStats ? printerStats.totalPrintTime : '0sn'}</strong>
+                </div>
+                <div class="analysis-stat-card" style="background: var(--surface-2, rgba(255, 255, 255, 0.02)); border: 1px solid var(--border, rgba(255, 255, 255, 0.08)); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 6px; transition: all 0.3s ease; box-shadow: 0 4px 20px rgba(0,0,0,0.15);">
+                    <span style="font-size: 10px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">📈 Ortalama Süre</span>
+                    <strong style="font-size: 18px; color: #9b5de5; font-family: 'Outfit', sans-serif;">${printerStats ? printerStats.avgTimePerPrint : '0sn'}</strong>
+                </div>
+            </div>
+            <style>
+                .analysis-stat-card:hover {
+                    background: var(--surface-3, rgba(255, 255, 255, 0.04)) !important;
+                    border-color: var(--accent, rgba(255, 255, 255, 0.15)) !important;
+                    transform: translateY(-2px);
+                }
+            </style>
+        `;
+
+        const summaryBarHtml = `
+            <div class="analysis-summary-bar" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; background: rgba(255, 255, 255, 0.02); padding: 12px; border-radius: 8px; border: 1px solid var(--border-light, rgba(255,255,255,0.08));">
+                <div class="summary-item" style="text-align: center;">
+                    <span style="display: block; font-size: 11px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">⏱️ Toplam Baskı Süresi</span>
+                    <strong style="font-size: 16px; color: var(--accent); font-family: 'Outfit', sans-serif;">${formattedTotalDuration}</strong>
+                </div>
+                <div class="summary-item" style="text-align: center; border-left: 1px solid var(--border-light, rgba(255,255,255,0.08));">
+                    <span style="display: block; font-size: 11px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">✅ Başarılı Baskılar</span>
+                    <strong style="font-size: 16px; color: #2ec4b6; font-family: 'Outfit', sans-serif;">${totalSuccess}</strong>
+                </div>
+                <div class="summary-item" style="text-align: center; border-left: 1px solid var(--border-light, rgba(255,255,255,0.08));">
+                    <span style="display: block; font-size: 11px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">❌ İptal Edilenler</span>
+                    <strong style="font-size: 16px; color: #ef476f; font-family: 'Outfit', sans-serif;">${totalCancelled}</strong>
+                </div>
+                <div class="summary-item" style="text-align: center; border-left: 1px solid var(--border-light, rgba(255,255,255,0.08));">
+                    <span style="display: block; font-size: 11px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">⚠️ Yakalanan Hatalar</span>
+                    <strong style="font-size: 16px; color: #ffbc42; font-family: 'Outfit', sans-serif;">${totalErrors}</strong>
+                </div>
+            </div>
+        `;
+
+        const filterVal = analysisViewState.filterVal || 'all';
+        const customStartDate = analysisViewState.customStartDate || '';
+        const customEndDate = analysisViewState.customEndDate || '';
+
+        function formatDateToYYYYMMDD(d) {
+            if (!d) return '';
+            const year = d.getFullYear();
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+
+        function parseYYYYMMDDToLocal(dateStr) {
+            if (!dateStr) return null;
+            const parts = dateStr.split('-');
+            if (parts.length !== 3) return null;
+            return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
         }
 
         const controlsHtml = `
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding: 2px; flex-wrap: wrap; gap: 10px;">
                 <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
                     <!-- Tarih Filtresi -->
-                    <div style="display: flex; align-items: center; gap: 6px;">
-                        <span style="font-size: 12px; font-weight: 600; color: var(--text-muted);">Tarih:</span>
+                    <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                        <span style="font-size: 12px; font-weight: 600; color: var(--text-muted);">Tarih Filtresi:</span>
                         <select id="analysis-filter-select" style="background: var(--surface-3, #090a0f); border: 1px solid var(--border-light, rgba(255, 255, 255, 0.08)); border-radius: 6px; color: #fff; font-size: 11.5px; font-weight: 600; padding: 4px 8px; height: 28px; outline: none; cursor: pointer; transition: border-color 0.2s;">
-                            <option value="all" selected>⌛ Tüm Zamanlar</option>
-                            <option value="24h">⏱️ Son 24 Saat</option>
-                            <option value="7d">📅 Son 7 Gün</option>
-                            <option value="30d">📅 Son 30 Gün</option>
+                            <option value="all" ${filterVal === 'all' ? 'selected' : ''}>⌛ Tüm Zamanlar</option>
+                            <option value="24h" ${filterVal === '24h' ? 'selected' : ''}>⏱️ Son 24 Saat</option>
+                            <option value="7d" ${filterVal === '7d' ? 'selected' : ''}>📅 Son 7 Gün</option>
+                            <option value="30d" ${filterVal === '30d' ? 'selected' : ''}>📅 Son 30 Gün</option>
+                            <option value="90d" ${filterVal === '90d' ? 'selected' : ''}>📅 Son 90 Gün</option>
+                            <option value="365d" ${filterVal === '365d' ? 'selected' : ''}>📅 Son 1 Yıl</option>
+                            <option value="custom" ${filterVal === 'custom' ? 'selected' : ''}>📅 Özel Tarih Aralığı</option>
                         </select>
+                        <div id="analysis-custom-date-container" style="display: flex; align-items: center; gap: 6px;">
+                            <input type="date" id="analysis-start-date" value="${customStartDate}" style="background: var(--surface-3, #090a0f); border: 1px solid var(--border-light, rgba(255, 255, 255, 0.08)); border-radius: 6px; color: #fff; font-size: 11.5px; padding: 4px 8px; height: 28px; outline: none; transition: border-color 0.2s;">
+                            <span style="font-size: 11px; color: var(--text-muted);">ve</span>
+                            <input type="date" id="analysis-end-date" value="${customEndDate}" style="background: var(--surface-3, #090a0f); border: 1px solid var(--border-light, rgba(255, 255, 255, 0.08)); border-radius: 6px; color: #fff; font-size: 11.5px; padding: 4px 8px; height: 28px; outline: none; transition: border-color 0.2s;">
+                        </div>
                     </div>
                     <!-- Sıralama Dropdown -->
                     <div style="display: flex; align-items: center; gap: 6px;">
@@ -2598,17 +3213,29 @@ window.showAnalysisResults = function(id) {
                 </div>
             </div>
             <div id="analysis-cards-container"></div>
+            <div id="analysis-files-pagination"></div>
         `;
 
-        structuredDiv.innerHTML = controlsHtml;
+        structuredDiv.innerHTML = statsTitleHtml + statsGridHtml + summaryBarHtml + controlsHtml;
         const container = document.getElementById('analysis-cards-container');
+        const filesPaginationEl = document.getElementById('analysis-files-pagination');
         const sortSelect = document.getElementById('analysis-sort-select');
         const filterSelect = document.getElementById('analysis-filter-select');
 
+        let filesPage = analysisViewState.filesPage;
+        const sessionPages = analysisViewState.sessionPages;
+        let filteredRunsCache = [];
+
         function getRunDate(run) {
             if (run.fileName === 'printer_logs.txt') {
-                // Ensure printer_logs.txt is always treated as the absolute newest
-                return new Date(8640000000000000); 
+                const sessions = buildPrintSessions(run.sections.baskiRaporu);
+                for (const session of sessions) {
+                    const timeStr = session.endTime || session.startTime;
+                    if (!timeStr) continue;
+                    const parsed = parseTrLogDate(timeStr);
+                    if (parsed) return parsed;
+                }
+                return new Date();
             }
             if (run.fileName === 'klippy.log' || run.fileName === 'Genel Analiz Raporu') {
                 return new Date();
@@ -2620,46 +3247,160 @@ window.showAnalysisResults = function(id) {
             return new Date(0);
         }
 
-        function displayCards(sortedRuns) {
-            container.innerHTML = sortedRuns.map(run => {
-                const hasBaskiRaporu = run.sections.baskiRaporu.length > 0;
-                const hasErrors = run.sections.errors.length > 0;
+        function isDateInFilterRange(date, filterVal) {
+            if (!date || filterVal === 'all') return true;
+
+            const startValStr = analysisViewState.customStartDate;
+            const endValStr = analysisViewState.customEndDate;
+
+            if (!startValStr && !endValStr) return true;
+
+            let startVal = parseYYYYMMDDToLocal(startValStr);
+            if (startVal) startVal.setHours(0, 0, 0, 0);
+
+            let endVal = parseYYYYMMDDToLocal(endValStr);
+            if (endVal) endVal.setHours(23, 59, 59, 999);
+
+            if (startVal && date < startVal) return false;
+            if (endVal && date > endVal) return false;
+            return true;
+        }
+
+        function displayCards(pagedRuns, filePageMeta) {
+            const filterVal = filterSelect.value;
+            container.innerHTML = pagedRuns.map(run => {
+                const rawPrintSessions = run.sections.printSessions && run.sections.printSessions.length > 0
+                    ? run.sections.printSessions
+                    : buildPrintSessions(run.sections.baskiRaporu);
+                const printSessions = rawPrintSessions.filter(s => {
+                    const sDate = parseTrLogDate(s.endTime || s.startTime);
+                    return isDateInFilterRange(sDate, filterVal);
+                });
+
+                const errors = run.sections.errors
+                    .map((err, idx) => ({ ...err, originalIndex: idx }))
+                    .filter(err => {
+                        const eDate = parseTrLogDate(err.time);
+                        return isDateInFilterRange(eDate, filterVal);
+                    })
+                    .sort((a, b) => {
+                        const dateA = parseTrLogDate(a.time);
+                        const dateB = parseTrLogDate(b.time);
+                        if (!dateA && !dateB) return b.originalIndex - a.originalIndex;
+                        if (!dateA) return 1;
+                        if (!dateB) return -1;
+                        const dateDiff = dateB - dateA;
+                        if (dateDiff !== 0) return dateDiff;
+                        return b.originalIndex - a.originalIndex;
+                    });
+
+                const totalMinutes = printSessions.reduce((acc, s) => acc + getPrintSessionMinutes(s), 0);
+                const totalDurationText = formatDuration(totalMinutes);
+                const scopeKey = escapeAnalysisScopeKey(run.fileName);
+                const sessionPage = sessionPages[run.fileName] || 1;
+                const sessionRender = renderPrintSessionsHtml(printSessions, sessionPage, ANALYSIS_SESSIONS_PER_PAGE);
+                sessionPages[run.fileName] = sessionRender.safePage;
+
+                const hasBaskiRaporu = printSessions.length > 0;
+                const hasErrors = errors.length > 0;
                 const hasMaxTemps = run.sections.maxTemps.length > 0;
 
-                const hasActivity = (run.sections.summary.success > 0 || run.sections.summary.cancelled > 0 || run.sections.summary.errors > 0 || hasBaskiRaporu);
+                const sessionCounts = {
+                    printing: printSessions.filter(s => s.status === 'printing').length,
+                    paused: printSessions.filter(s => s.status === 'paused').length,
+                    completed: printSessions.filter(s => s.status === 'completed').length,
+                    cancelled: printSessions.filter(s => s.status === 'cancelled').length
+                };
+                const successCount = filterVal === 'all'
+                    ? Math.max(run.sections.summary.success || 0, sessionCounts.completed)
+                    : sessionCounts.completed;
+                const cancelCount = filterVal === 'all'
+                    ? Math.max(run.sections.summary.cancelled || 0, sessionCounts.cancelled)
+                    : sessionCounts.cancelled;
+                const errorCount = filterVal === 'all'
+                    ? (run.sections.summary.errors || 0)
+                    : errors.length;
 
-                const printHistoryHtml = hasBaskiRaporu 
-                    ? run.sections.baskiRaporu.map(item => `
-                        <div style="display: flex; gap: 10px; font-size: 12px; align-items: center; margin-bottom: 4px;">
-                            <span style="font-size: 14px;">${item.type === 'start' ? '🚀' : item.type === 'success' ? '✅' : item.type === 'cancel' ? '❌' : 'ℹ️'}</span>
-                            <span style="color: var(--text-main); font-weight: 500;">${item.text}</span>
-                        </div>
-                      `).join('')
-                    : `<span style="font-size: 12px; color: var(--text-muted);">Herhangi bir gerçek zamanlı baskı hareketi bulunmuyor.</span>`;
+                const hasActivity = (successCount > 0 || cancelCount > 0 || errorCount > 0
+                    || sessionCounts.printing > 0 || sessionCounts.paused > 0 || hasBaskiRaporu);
+
+                const sessionPaginationHtml = renderAnalysisPaginationBar(
+                    scopeKey,
+                    sessionRender.safePage,
+                    sessionRender.totalPages,
+                    `Sayfa ${sessionRender.safePage} / ${sessionRender.totalPages} · Oturum ${sessionRender.rangeStart}-${sessionRender.rangeEnd} / ${sessionRender.totalItems}`
+                );
+
+                const printHistoryHtml = sessionRender.html + sessionPaginationHtml;
 
                 const errorsTableHtml = hasErrors
                     ? `
-                        <div class="scrollable-inner-box" style="overflow-x: auto; max-height: 220px; overflow-y: auto; background: var(--surface-3); border: 1px solid var(--border-light); border-radius: 6px;">
-                            <table style="display: table; width: 100%; min-width: 650px; border-collapse: collapse; text-align: left; font-size: 11.5px; color: var(--text-main);">
+                        <div class="scrollable-inner-box" style="overflow-x: auto; max-height: 400px; overflow-y: auto; background: var(--surface-3); border: 1px solid var(--border-light); border-radius: 6px; width: 100%;">
+                            <table style="display: table; width: 100%; min-width: 100%; border-collapse: collapse; text-align: left; font-size: 13px; color: var(--text-main);">
                                 <thead style="display: table-header-group;">
                                     <tr style="display: table-row; height: 32px;">
                                         <th style="display: table-cell; position: sticky; top: 0; z-index: 10; background: var(--surface-3); border-bottom: 1px solid var(--border-light); padding: 8px 12px; font-weight: 700; color: var(--text-main); text-align: left; width: 80px; min-width: 80px;">Saat</th>
                                         <th style="display: table-cell; position: sticky; top: 0; z-index: 10; background: var(--surface-3); border-bottom: 1px solid var(--border-light); padding: 8px 12px; font-weight: 700; color: var(--text-main); text-align: left; width: 130px; min-width: 130px;">Hata Kodu</th>
                                         <th style="display: table-cell; position: sticky; top: 0; z-index: 10; background: var(--surface-3); border-bottom: 1px solid var(--border-light); padding: 8px 12px; font-weight: 700; color: var(--text-main); text-align: left; width: 180px; min-width: 180px;">Hata Başlığı</th>
-                                        <th style="display: table-cell; position: sticky; top: 0; z-index: 10; background: var(--surface-3); border-bottom: 1px solid var(--border-light); padding: 8px 12px; font-weight: 700; color: var(--text-main); text-align: left; min-width: 250px;">Ayıklanan Açıklama</th>
+                                        <th style="display: table-cell; position: sticky; top: 0; z-index: 10; background: var(--surface-3); border-bottom: 1px solid var(--border-light); padding: 8px 12px; font-weight: 700; color: var(--text-main); text-align: left; width: 70px; min-width: 70px;">Süre</th>
+                                        <th style="display: table-cell; position: sticky; top: 0; z-index: 10; background: var(--surface-3); border-bottom: 1px solid var(--border-light); padding: 8px 12px; font-weight: 700; color: var(--text-main); text-align: left; min-width: 200px;">Ayıklanan Açıklama</th>
                                     </tr>
                                 </thead>
                                 <tbody style="display: table-row-group;">
-                                    ${run.sections.errors.map(err => `
-                                        <tr style="display: table-row; border-bottom: 1px solid rgba(255, 255, 255, 0.02); height: 36px;">
-                                            <td style="display: table-cell; padding: 8px 12px; white-space: nowrap; color: var(--text-main); font-family: monospace; text-align: left; vertical-align: middle; width: 80px; min-width: 80px;">${err.time}</td>
-                                            <td style="display: table-cell; padding: 8px 12px; white-space: nowrap; text-align: left; vertical-align: middle; width: 130px; min-width: 130px;">
-                                                <span class="printer-status-badge printing" style="padding: 2px 6px; font-size: 9.5px; font-family: monospace; font-weight: 600; max-width: 110px; display: inline-block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle;" title="${err.code}">${err.code}</span>
-                                            </td>
-                                            <td style="display: table-cell; padding: 8px 12px; font-weight: 600; color: var(--text-main); text-align: left; vertical-align: middle; width: 180px; min-width: 180px;">${err.title}</td>
-                                            <td style="display: table-cell; padding: 8px 12px; color: var(--text-muted); word-break: break-word; line-height: 1.4; text-align: left; vertical-align: middle; min-width: 250px;">${err.desc}</td>
-                                        </tr>
-                                    `).join('')}
+                                    ${errors.map((err, index) => {
+                        const hasDetail = err.context || (err.recentGcodes && err.recentGcodes.length > 0);
+                        const rowBg = index % 2 === 0 ? 'transparent' : 'rgba(255, 255, 255, 0.015)';
+                        const rowStyle = hasDetail
+                            ? `display: table-row; border-bottom: 1px solid rgba(255, 255, 255, 0.05); height: 36px; cursor: pointer; transition: background 0.15s; background: ${rowBg};`
+                            : `display: table-row; border-bottom: 1px solid rgba(255, 255, 255, 0.05); height: 36px; background: ${rowBg};`;
+                        const hoverAttr = hasDetail ? `onmouseover="if(!this.classList.contains('expanded')) this.style.background='rgba(255,255,255,0.02)'" onmouseout="if(!this.classList.contains('expanded')) this.style.background='${rowBg}'"` : '';
+
+                        // Show only HH:MM:SS from full datetime; full datetime as tooltip
+                        const errTimeDisplay = (() => {
+                            if (!err.time) return '-';
+                            // "DD.MM.YYYY HH:MM:SS" → take the time part
+                            const parts = String(err.time).split(' ');
+                            return parts.length >= 2 ? parts[1] : parts[0];
+                        })();
+                        return `
+                                            <tr style="${rowStyle}" ${hoverAttr} data-original-bg="${rowBg}" onclick="${hasDetail ? 'toggleErrorDetail(this)' : ''}">
+                                                <td style="display: table-cell; padding: 8px 12px; white-space: nowrap; color: var(--text-main); font-family: monospace; text-align: left; vertical-align: middle; width: 80px; min-width: 80px;" title="${err.time} (Tam Tarih)">${errTimeDisplay}</td>
+                                                <td style="display: table-cell; padding: 8px 12px; white-space: nowrap; text-align: left; vertical-align: middle; width: 130px; min-width: 130px;">
+                                                    <span class="printer-status-badge printing" style="padding: 2px 6px; font-size: 11px; font-family: monospace; font-weight: 600; max-width: 135px; display: inline-block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle;" title="${err.code || err.type || ''}">${err.code || err.type || ''}</span>
+                                                    ${hasDetail ? '<span style="font-size: 11px; margin-left: 4px; color: var(--accent);">🔍 Detay</span>' : ''}
+                                                </td>
+                                                <td style="display: table-cell; padding: 8px 12px; font-weight: 600; color: var(--text-main); text-align: left; vertical-align: middle; width: 180px; min-width: 180px;">${err.title}</td>
+                                                <td style="display: table-cell; padding: 8px 12px; color: var(--text-light); text-align: left; vertical-align: middle; width: 70px; min-width: 70px;">${err.duration || '-'}</td>
+                                                <td style="display: table-cell; padding: 8px 12px; color: var(--text-muted); word-break: break-word; line-height: 1.4; text-align: left; vertical-align: middle; min-width: 200px;">${err.desc}</td>
+                                            </tr>
+                                            ${hasDetail ? `
+                                                <tr class="error-detail-row" style="display: none; background: rgba(239, 71, 111, 0.04); border-bottom: 1px solid rgba(255, 255, 255, 0.04);">
+                                                    <td colspan="5" style="padding: 12px 16px 12px 28px; font-family: 'Outfit', sans-serif;">
+                                                        <div style="display: flex; flex-direction: column; gap: 10px; border-left: 3px solid #ef476f; padding-left: 16px;">
+                                                            ${err.recentGcodes && err.recentGcodes.length > 0 ? `
+                                                                <div>
+                                                                    <div style="font-size: 12.5px; font-weight: 700; color: #ff9a3c; text-transform: uppercase; margin-bottom: 6px; display: flex; align-items: center; gap: 5px;">
+                                                                        <span>⚡</span> Hata Öncesi Son G-Code Komutları
+                                                                    </div>
+                                                                    <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                                                                        ${err.recentGcodes.map(cmd => `<code style="background: rgba(255, 154, 60, 0.08); color: #ff9a3c; padding: 3px 8px; border-radius: 4px; border: 1px solid rgba(255, 154, 60, 0.15); font-size: 12.5px; font-family: monospace;">${cmd}</code>`).join('')}
+                                                                    </div>
+                                                                </div>
+                                                            ` : ''}
+                                                            ${err.context ? `
+                                                                <div>
+                                                                    <div style="font-size: 12.5px; font-weight: 700; color: #ef476f; text-transform: uppercase; margin-bottom: 6px; display: flex; align-items: center; gap: 5px;">
+                                                                        <span>📋</span> Hata Öncesi Log Kayıtları (Klippy.log Context)
+                                                                    </div>
+                                                                    <pre style="margin: 0; background: #05060a; padding: 10px; border-radius: 5px; border: 1px solid rgba(255, 255, 255, 0.04); font-family: monospace; font-size: 12.5px; color: #e5c7c7; white-space: pre-wrap; max-height: 150px; overflow-y: auto; line-height: 1.4; text-align: left; box-shadow: inset 0 2px 6px rgba(0,0,0,0.6);">${err.context}</pre>
+                                                                </div>
+                                                            ` : ''}
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            ` : ''}
+                                        `;
+                    }).join('')}
                                 </tbody>
                             </table>
                         </div>
@@ -2689,7 +3430,7 @@ window.showAnalysisResults = function(id) {
                                 </div>
                             </div>
                         `;
-                      }).join('')
+                    }).join('')
                     : `<span style="font-size: 12px; color: var(--text-muted);">Sıcaklık verisi bulunmuyor.</span>`;
 
                 const serverEventsHtml = run.sections.serverLogs.length > 0
@@ -2703,7 +3444,7 @@ window.showAnalysisResults = function(id) {
 ------------------------------------------------------------
 ${evt.payload ? JSON.stringify(evt.payload, null, 2) : evt.raw}
 ------------------------------------------------------------`
-                                    ).join('\n')}
+                    ).join('\n')}
                                 </div>
                             </details>
                         </div>
@@ -2721,37 +3462,35 @@ ${evt.payload ? JSON.stringify(evt.payload, null, 2) : evt.raw}
                                 </svg>
                                 <span style="font-weight: 700; color: var(--text-main); font-size: 13.5px; font-family: monospace;">📄 ${run.fileName}</span>
                             </div>
-                            <div style="display: flex; gap: 6px;" onclick="event.stopPropagation();">
-                                <span class="printer-status-badge idle" style="font-size: 10px; padding: 2px 8px; font-weight: 700;">Başarılı: ${run.sections.summary.success}</span>
-                                <span class="printer-status-badge connecting" style="font-size: 10px; padding: 2px 8px; font-weight: 700; background: rgba(255, 107, 0, 0.1); color: #ff9a3c; border-color: rgba(255, 107, 0, 0.25);">İptal: ${run.sections.summary.cancelled}</span>
-                                <span class="printer-status-badge printing" style="font-size: 10px; padding: 2px 8px; font-weight: 700; background: rgba(239, 71, 111, 0.1); color: #ef476f; border-color: rgba(239, 71, 111, 0.25);">Hata: ${run.sections.summary.errors}</span>
+                            <div style="display: flex; gap: 6px; flex-wrap: wrap;" onclick="event.stopPropagation();">
+                                ${printSessions.length > 0 ? `<span class="printer-status-badge info" style="font-size: 10px; padding: 2px 8px; font-weight: 700; background: rgba(0, 206, 201, 0.12); color: #00cec9; border-color: rgba(0, 206, 201, 0.25); white-space: nowrap;">⏱️ Toplam Baskı: ${totalDurationText}</span>` : ''}
+                                ${sessionCounts.printing > 0 ? `<span class="printer-status-badge printing" style="font-size: 10px; padding: 2px 8px; font-weight: 700;">Aktif: ${sessionCounts.printing}</span>` : ''}
+                                ${sessionCounts.paused > 0 ? `<span class="printer-status-badge connecting" style="font-size: 10px; padding: 2px 8px; font-weight: 700; background: rgba(255, 193, 7, 0.1); color: #ffc107; border-color: rgba(255, 193, 7, 0.25);">Duraklatıldı: ${sessionCounts.paused}</span>` : ''}
+                                <span class="printer-status-badge idle" style="font-size: 10px; padding: 2px 8px; font-weight: 700;">Başarılı: ${successCount}</span>
+                                <span class="printer-status-badge connecting" style="font-size: 10px; padding: 2px 8px; font-weight: 700; background: rgba(255, 107, 0, 0.1); color: #ff9a3c; border-color: rgba(255, 107, 0, 0.25);">İptal: ${cancelCount}</span>
+                                <span class="printer-status-badge printing" style="font-size: 10px; padding: 2px 8px; font-weight: 700; background: rgba(239, 71, 111, 0.1); color: #ef476f; border-color: rgba(239, 71, 111, 0.25);">Hata: ${errorCount}</span>
                             </div>
                         </div>
                         
                         <!-- Card Body -->
-                        <div class="analysis-run-card-body" style="display: ${hasActivity ? 'flex' : 'none'}; flex-direction: column; gap: 15px;">
+                        <div class="analysis-run-card-body" style="display: ${hasActivity ? 'flex' : 'none'}; flex-direction: column; gap: 18px;">
                             <!-- Content Flex Grid (Responsive) -->
                             <div style="display: flex; gap: 20px; flex-wrap: wrap; width: 100%;">
                                 
-                                <!-- Left Column (Print History & Errors) -->
+                                <!-- Left Column (Print History) -->
                                 <div style="display: flex; flex-direction: column; gap: 15px; flex: 2; min-width: 380px;">
                                     <!-- Print History -->
                                     <div>
-                                        <h4 style="margin: 0 0 8px 0; font-size: 11.5px; font-weight: 700; text-transform: uppercase; color: var(--accent); letter-spacing: 0.5px;">Baskı Geçmişi</h4>
-                                        <div class="scrollable-inner-box" style="display: flex; flex-direction: column; gap: 6px; background: var(--surface-3); padding: 12px; border-radius: 6px; border: 1px solid var(--border-light); max-height: 220px; overflow-y: auto;">
+                                        <h4 style="margin: 0 0 8px 0; font-size: 13.5px; font-weight: 700; text-transform: uppercase; color: var(--accent); letter-spacing: 0.5px;">Baskı Oturumları</h4>
+                                        <div class="scrollable-inner-box" style="display: flex; flex-direction: column; gap: 6px; background: var(--surface-3); padding: 12px; border-radius: 6px; border: 1px solid var(--border-light); max-height: 360px; overflow-y: auto;">
                                             ${printHistoryHtml}
                                         </div>
-                                    </div>
-                                    <!-- Errors Table -->
-                                    <div>
-                                        <h4 style="margin: 0 0 8px 0; font-size: 11.5px; font-weight: 700; text-transform: uppercase; color: #ef476f; letter-spacing: 0.5px;">Yakalanan Kritik Hatalar</h4>
-                                        ${errorsTableHtml}
                                     </div>
                                 </div>
                                 
                                 <!-- Right Column (Peak Temps) -->
                                 <div style="flex: 1; min-width: 200px;">
-                                    <h4 style="margin: 0 0 8px 0; font-size: 11.5px; font-weight: 700; text-transform: uppercase; color: #ffc107; letter-spacing: 0.5px;">Zirve Sıcaklıklar</h4>
+                                    <h4 style="margin: 0 0 8px 0; font-size: 13.5px; font-weight: 700; text-transform: uppercase; color: #ffc107; letter-spacing: 0.5px;">Zirve Sıcaklıklar</h4>
                                     <div style="display: flex; flex-direction: column; gap: 10px; background: var(--surface-3); padding: 14px; border-radius: 6px; border: 1px solid var(--border-light);">
                                         ${tempsGridHtml}
                                     </div>
@@ -2759,15 +3498,30 @@ ${evt.payload ? JSON.stringify(evt.payload, null, 2) : evt.raw}
                                 
                             </div>
                             
+                            <!-- Bottom Full Width Column (Errors Table) -->
+                            <div style="width: 100%;">
+                                <h4 style="margin: 0 0 8px 0; font-size: 13.5px; font-weight: 700; text-transform: uppercase; color: #ef476f; letter-spacing: 0.5px;">Yakalanan Kritik Hatalar (${errors.length})</h4>
+                                ${errorsTableHtml}
+                            </div>
+                            
                             <!-- Server Events log block -->
                             ${serverEventsHtml}
                         </div>
                         
-
-                        
                     </div>
                 `;
             }).join('');
+
+            if (filePageMeta && filePageMeta.totalPages > 1) {
+                filesPaginationEl.innerHTML = renderAnalysisPaginationBar(
+                    'files',
+                    filePageMeta.safePage,
+                    filePageMeta.totalPages,
+                    `Log dosyası sayfa ${filePageMeta.safePage} / ${filePageMeta.totalPages} · ${filePageMeta.rangeStart}-${filePageMeta.rangeEnd} / ${filePageMeta.totalItems}`
+                );
+            } else {
+                filesPaginationEl.innerHTML = '';
+            }
         }
 
         function sortAndDisplay() {
@@ -2778,39 +3532,155 @@ ${evt.payload ? JSON.stringify(evt.payload, null, 2) : evt.raw}
             let filteredRuns = runs.slice();
             const now = new Date();
 
-            if (filterVal === '24h') {
-                const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-                filteredRuns = filteredRuns.filter(run => getRunDate(run) >= oneDayAgo);
-            } else if (filterVal === '7d') {
-                const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-                filteredRuns = filteredRuns.filter(run => getRunDate(run) >= sevenDaysAgo);
-            } else if (filterVal === '30d') {
-                const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-                filteredRuns = filteredRuns.filter(run => getRunDate(run) >= thirtyDaysAgo);
+            if (filterVal !== 'all') {
+                const startValStr = analysisViewState.customStartDate;
+                const endValStr = analysisViewState.customEndDate;
+
+                let startVal = parseYYYYMMDDToLocal(startValStr);
+                if (startVal) startVal.setHours(0, 0, 0, 0);
+
+                let endVal = parseYYYYMMDDToLocal(endValStr);
+                if (endVal) endVal.setHours(23, 59, 59, 999);
+
+                filteredRuns = filteredRuns.filter(run => {
+                    const runDate = getRunDate(run);
+                    if (startVal && runDate < startVal) return false;
+                    if (endVal && runDate > endVal) return false;
+                    return true;
+                });
             }
 
-            // 2. Sort
+            // 2. Sort — printer_logs en üstte, sonra seçilen sıralama
             if (sortVal === 'newest') {
-                filteredRuns.sort((a, b) => getRunDate(b) - getRunDate(a));
+                filteredRuns.sort((a, b) => {
+                    if (a.fileName === 'printer_logs.txt') return -1;
+                    if (b.fileName === 'printer_logs.txt') return 1;
+                    return getRunDate(b) - getRunDate(a);
+                });
             } else if (sortVal === 'oldest') {
-                filteredRuns.sort((a, b) => getRunDate(a) - getRunDate(b));
+                filteredRuns.sort((a, b) => {
+                    if (a.fileName === 'printer_logs.txt') return -1;
+                    if (b.fileName === 'printer_logs.txt') return 1;
+                    return getRunDate(a) - getRunDate(b);
+                });
             } else if (sortVal === 'errors-desc') {
                 filteredRuns.sort((a, b) => (b.sections.summary.errors || 0) - (a.sections.summary.errors || 0));
             } else if (sortVal === 'errors-asc') {
                 filteredRuns.sort((a, b) => (a.sections.summary.errors || 0) - (b.sections.summary.errors || 0));
             }
 
+            filteredRunsCache = filteredRuns;
+
+            const totalFileItems = filteredRuns.length;
+            const totalFilePages = Math.max(1, Math.ceil(totalFileItems / ANALYSIS_FILES_PER_PAGE));
+            filesPage = Math.min(Math.max(1, filesPage), totalFilePages);
+            analysisViewState.filesPage = filesPage;
+            const fileOffset = (filesPage - 1) * ANALYSIS_FILES_PER_PAGE;
+            const pagedRuns = filteredRuns.slice(fileOffset, fileOffset + ANALYSIS_FILES_PER_PAGE);
+
             // 3. Display
             if (filteredRuns.length === 0) {
                 container.innerHTML = `<div style="text-align: center; color: var(--text-muted); padding: 30px;">Seçilen tarih aralığında analiz verisi bulunamadı.</div>`;
+                filesPaginationEl.innerHTML = '';
             } else {
-                displayCards(filteredRuns);
+                displayCards(pagedRuns, {
+                    safePage: filesPage,
+                    totalPages: totalFilePages,
+                    totalItems: totalFileItems,
+                    rangeStart: totalFileItems > 0 ? fileOffset + 1 : 0,
+                    rangeEnd: Math.min(fileOffset + ANALYSIS_FILES_PER_PAGE, totalFileItems)
+                });
             }
         }
 
-        sortSelect.onchange = sortAndDisplay;
-        filterSelect.onchange = sortAndDisplay;
-        
+        structuredDiv.onclick = (e) => {
+            const btn = e.target.closest('[data-analysis-page]');
+            if (!btn || btn.disabled) return;
+
+            const scope = btn.dataset.analysisScope;
+            const action = btn.dataset.analysisPage;
+            if (!scope || !action) return;
+
+            if (scope === 'files') {
+                const totalFilePages = Math.max(1, Math.ceil(filteredRunsCache.length / ANALYSIS_FILES_PER_PAGE));
+                if (action === 'prev' && filesPage > 1) filesPage -= 1;
+                if (action === 'next' && filesPage < totalFilePages) filesPage += 1;
+                analysisViewState.filesPage = filesPage;
+            } else {
+                const run = filteredRunsCache.find(r => escapeAnalysisScopeKey(r.fileName) === scope);
+                if (!run) return;
+                const totalSessions = buildPrintSessions(run.sections.baskiRaporu).length;
+                const totalSessionPages = Math.max(1, Math.ceil(totalSessions / ANALYSIS_SESSIONS_PER_PAGE));
+                const current = sessionPages[run.fileName] || 1;
+                if (action === 'prev' && current > 1) sessionPages[run.fileName] = current - 1;
+                if (action === 'next' && current < totalSessionPages) sessionPages[run.fileName] = current + 1;
+            }
+
+            sortAndDisplay();
+        };
+
+        sortSelect.onchange = () => {
+            analysisViewState.filesPage = 1;
+            Object.keys(analysisViewState.sessionPages).forEach(k => delete analysisViewState.sessionPages[k]);
+            sortAndDisplay();
+        };
+        filterSelect.onchange = () => {
+            const val = filterSelect.value;
+            analysisViewState.filterVal = val;
+
+            if (val === 'all') {
+                analysisViewState.customStartDate = '';
+                analysisViewState.customEndDate = '';
+            } else if (val !== 'custom') {
+                const now = new Date();
+                let start = null;
+                let end = now;
+                if (val === '24h') {
+                    start = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+                } else if (val === '7d') {
+                    start = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+                } else if (val === '30d') {
+                    start = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+                } else if (val === '90d') {
+                    start = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+                } else if (val === '365d') {
+                    start = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
+                }
+
+                if (start) {
+                    analysisViewState.customStartDate = formatDateToYYYYMMDD(start);
+                    analysisViewState.customEndDate = formatDateToYYYYMMDD(end);
+                }
+            }
+
+            const startEl = document.getElementById('analysis-start-date');
+            const endEl = document.getElementById('analysis-end-date');
+            if (startEl) startEl.value = analysisViewState.customStartDate;
+            if (endEl) endEl.value = analysisViewState.customEndDate;
+
+            analysisViewState.filesPage = 1;
+            Object.keys(analysisViewState.sessionPages).forEach(k => delete analysisViewState.sessionPages[k]);
+            sortAndDisplay();
+        };
+
+        const startDateInput = document.getElementById('analysis-start-date');
+        const endDateInput = document.getElementById('analysis-end-date');
+
+        const onCustomDateChange = () => {
+            analysisViewState.customStartDate = startDateInput.value;
+            analysisViewState.customEndDate = endDateInput.value;
+            analysisViewState.filterVal = 'custom';
+            if (filterSelect) {
+                filterSelect.value = 'custom';
+            }
+            analysisViewState.filesPage = 1;
+            Object.keys(analysisViewState.sessionPages).forEach(k => delete analysisViewState.sessionPages[k]);
+            sortAndDisplay();
+        };
+
+        if (startDateInput) startDateInput.onchange = onCustomDateChange;
+        if (endDateInput) endDateInput.onchange = onCustomDateChange;
+
         // Initial render
         sortAndDisplay();
 
@@ -2842,56 +3712,110 @@ ${evt.payload ? JSON.stringify(evt.payload, null, 2) : evt.raw}
         }
     }
 
-    function loadContent() {
-        if (fs.existsSync(analysisFilePath)) {
+    async function loadContent() {
+        try {
+            // Also update total duration when content is reloaded
+            ipcRenderer.invoke('get-printer-total-duration', id).then(totalMins => {
+                const totalDurationText = formatDuration(totalMins);
+                titleEl.innerText = `${p.name || 'Bilinmiyor'} - Log Analiz Raporu (Toplam Baskı Süresi: ${totalDurationText})`;
+            }).catch(err => {
+                console.error('[Analysis] Failed to load total print duration:', err);
+            });
+
+            const dbRuns = await ipcRenderer.invoke('get-printer-runs', id);
+            let printerStats = null;
             try {
-                const content = fs.readFileSync(analysisFilePath, 'utf8');
-                preEl.innerText = content;
-                
-                const runs = parseAnalysisReport(content);
-                renderStructuredReport(runs);
-                
+                printerStats = await ipcRenderer.invoke('get-printer-stats', id);
+            } catch (err) {
+                console.error('[Analysis] Failed to load printer stats:', err);
+            }
+
+            if (dbRuns && dbRuns.length > 0) {
+                rawTextContent = dbRuns.map(run => {
+                    return `============================================================\n📊 LOG KAYITLARI SENKRONİZASYON VE ANALİZİ - DOSYA: ${run.fileName}\n============================================================\n${run.reportContent}`;
+                }).join('\n\n');
+                preEl.innerText = '';
+
+                const runs = dbRuns.map(run => ({
+                    fileName: run.fileName,
+                    sections: {
+                        serverLogs: run.serverLogs || [],
+                        baskiRaporu: run.baskiRaporu || [],
+                        maxTemps: run.maxTemps || [],
+                        summary: run.summary || { success: 0, cancelled: 0, paused: 0, errors: 0 },
+                        errors: run.errors || [],
+                        printSessions: run.printSessions || []
+                    },
+                    reportContent: run.reportContent
+                }));
+
+                renderStructuredReport(runs, printerStats);
+
                 setTimeout(() => {
                     preEl.scrollTop = preEl.scrollHeight;
                 }, 50);
-            } catch (e) {
-                const errText = `Rapor dosyası okunurken bir hata oluştu:\n${e.message}`;
-                preEl.innerText = errText;
-                structuredDiv.innerHTML = `<div style="text-align: center; color: var(--text-muted); padding: 30px;">${errText}</div>`;
+            } else {
+                const missingText = `Yazıcı için henüz analiz raporu oluşturulmamış.\n\nLütfen logları analiz etmek için önce "Analiz Et" butonuna tıklayın.`;
+                preEl.innerText = missingText;
+                structuredDiv.innerHTML = `
+                    <div style="text-align: center; color: var(--text-muted); padding: 40px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;">
+                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity: 0.5; stroke: var(--accent);">
+                            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                        </svg>
+                        <h3 style="font-size: 15px; font-weight: 600; color: #fff; margin: 0;">Rapor Dosyası Bulunamadı</h3>
+                        <p style="font-size: 12.5px; max-width: 300px; line-height: 1.5; margin: 0 0 10px 0;">Yazıcı için henüz analiz raporu oluşturulmamış.</p>
+                        <button class="btn-primary" onclick="document.getElementById('analysis-results-modal').classList.add('hidden'); analyzeLanLogs('${p.id}');" style="font-size: 12px; padding: 6px 14px; height: auto; margin: 0; width: auto;">Analizi Şimdi Başlat</button>
+                    </div>
+                `;
             }
-        } else {
-            const missingText = `Yazıcı için henüz analiz raporu oluşturulmamış.\n\nLütfen logları analiz etmek için önce "Analiz Et" butonuna tıklayın.`;
-            preEl.innerText = missingText;
-            structuredDiv.innerHTML = `
-                <div style="text-align: center; color: var(--text-muted); padding: 40px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;">
-                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity: 0.5; stroke: var(--accent);">
-                        <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-                    </svg>
-                    <h3 style="font-size: 15px; font-weight: 600; color: #fff; margin: 0;">Rapor Dosyası Bulunamadı</h3>
-                    <p style="font-size: 12.5px; max-width: 300px; line-height: 1.5; margin: 0 0 10px 0;">Yazıcı için henüz analiz raporu oluşturulmamış.</p>
-                    <button class="btn-primary" onclick="document.getElementById('analysis-results-modal').classList.add('hidden'); analyzeLanLogs('${p.id}');" style="font-size: 12px; padding: 6px 14px; height: auto; margin: 0; width: auto;">Analizi Şimdi Başlat</button>
-                </div>
-            `;
+        } catch (e) {
+            const errText = `Rapor dosyası okunurken bir hata oluştu:\n${e.message}`;
+            preEl.innerText = errText;
+            structuredDiv.innerHTML = `<div style="text-align: center; color: var(--text-muted); padding: 30px;">${errText}</div>`;
         }
     }
 
-    loadContent();
+    await loadContent();
 
     // Auto-analyze in the background silently to fetch the latest data
+    let _analysisRefreshBusy = false;
     const refreshData = () => {
+        if (_analysisRefreshBusy) {
+            console.log('[Analysis] Skipping refresh - previous refresh still in progress.');
+            return;
+        }
+        _analysisRefreshBusy = true;
+        console.log('[Analysis] Refreshing analysis data for printer:', id);
         analyzeLanLogs(id, true).then((res) => {
+            console.log('[Analysis] Refresh result:', res);
             if (res && res.success) {
                 loadContent();
             }
+        }).catch(err => {
+            console.error('[Analysis] Auto-refresh error:', err);
+        }).finally(() => {
+            _analysisRefreshBusy = false;
         });
     };
-    
-    refreshData();
-    
+
+    try {
+        const dbRuns = await ipcRenderer.invoke('get-printer-runs', id);
+        if (!dbRuns || dbRuns.length === 0) {
+            console.log('[Analysis] No database runs found, triggering analysis for printer:', id);
+            refreshData();
+        } else {
+            console.log('[Analysis] Runs found in database, scheduling sync.');
+            setTimeout(refreshData, 2000);
+        }
+    } catch (err) {
+        console.error('[Analysis] Error checking runs database:', err);
+        refreshData();
+    }
+
     if (window.analysisAutoRefreshInterval) {
         clearInterval(window.analysisAutoRefreshInterval);
     }
-    window.analysisAutoRefreshInterval = setInterval(refreshData, 5000);
+    window.analysisAutoRefreshInterval = setInterval(refreshData, 60000);
 
     document.getElementById('analysis-open-folder-btn').onclick = () => {
         if (fs.existsSync(printerFolder)) {
@@ -2905,13 +3829,14 @@ ${evt.payload ? JSON.stringify(evt.payload, null, 2) : evt.raw}
         const btn = document.getElementById('analysis-refresh-btn');
         const icon = btn.querySelector('svg');
         if (icon) icon.style.animation = 'spin-clockwise 1s linear infinite';
-        
+
         analyzeLanLogs(id, true).then(() => {
             if (icon) icon.style.animation = '';
             loadContent();
         });
     };
 
+    window.refreshAnalysisModalContent = loadContent;
     modal.classList.remove('hidden');
 };
 
@@ -2921,6 +3846,9 @@ document.querySelectorAll('.filter-tab-mode').forEach(tab => {
         document.querySelectorAll('.filter-tab-mode').forEach(t => t.classList.remove('active'));
         tab.classList.add('active');
         currentModeFilter = tab.getAttribute('data-mode');
+        // Persist selection
+        appSettings.printerModeFilter = currentModeFilter;
+        saveAppSettings();
         renderPrinters();
     });
 });
@@ -2930,6 +3858,9 @@ document.querySelectorAll('.filter-tab-status').forEach(tab => {
         document.querySelectorAll('.filter-tab-status').forEach(t => t.classList.remove('active'));
         tab.classList.add('active');
         currentStatusFilter = tab.getAttribute('data-status');
+        // Persist selection
+        appSettings.printerStatusFilter = currentStatusFilter;
+        saveAppSettings();
         renderPrinters();
     });
 });
@@ -2986,25 +3917,27 @@ function buildProgressString(p, curProg) {
     if (p.t3Temp !== undefined && (p.t3Temp > 0 || p.targetT3Temp > 0)) temps.push(`T3: ${Math.round(p.t3Temp)}°C/${Math.round(p.targetT3Temp || 0)}°C`);
     if (p.bedTemp !== undefined) temps.push(`Bed: ${Math.round(p.bedTemp || 0)}°C/${Math.round(p.targetBedTemp || 0)}°C`);
     if (p.envTemp !== undefined && (p.envTemp > 0 || p.targetEnvTemp > 0)) temps.push(`Env: ${Math.round(p.envTemp)}°C/${Math.round(p.targetEnvTemp || 0)}°C`);
-    
-    return `Yazdırılıyor: %${curProg} - ${temps.join(', ')}, Hız: ${p.speed || 0}mm/s`;
+
+    const fileName = (p.file && p.file !== '-') ? p.file : '';
+    const filePart = fileName ? `Dosya: ${fileName} | ` : '';
+
+    return `${filePart}Yazdırılıyor: %${curProg} - ${temps.join(', ')}, Hız: ${p.speed || 0}mm/s`;
 }
 
-function logPrinterEvent(printer, eventType, message) {
-    if (printer.mode !== 'lan' || !printer.logFolderPath) return;
+async function logPrinterEvent(printer, eventType, message) {
+    if (printer.mode !== 'lan') return;
     try {
-        const printerFolder = getPrinterFolderPath(printer);
-        if (!printerFolder) return;
-        if (!fs.existsSync(printerFolder)) {
-            fs.mkdirSync(printerFolder, { recursive: true });
+        await ipcRenderer.invoke('log-printer-event', {
+            printerId: printer.id,
+            eventType: eventType,
+            message: message
+        });
+        console.log(`[LAN Log] Wrote event to db: ${message}`);
+        if (window.refreshAnalysisModalContent && analysisViewState.printerId === printer.id) {
+            window.refreshAnalysisModalContent();
         }
-        const logFile = path.join(printerFolder, 'printer_logs.txt');
-        const timestamp = new Date().toLocaleString('tr-TR');
-        const logLine = `[${timestamp}] [${eventType.toUpperCase()}] ${message}\n`;
-        fs.appendFileSync(logFile, logLine, 'utf8');
-        console.log(`[LAN Log] Wrote event: ${message}`);
     } catch (e) {
-        console.error('Failed to write printer event log:', e);
+        console.error('Failed to log printer event to db:', e);
     }
 }
 
@@ -3024,7 +3957,7 @@ function toggleModeFields() {
     const lanFolderGroup = document.getElementById('lan-folder-group');
     const addressInput = document.getElementById('printer-address');
     const folderInput = document.getElementById('printer-log-folder');
-    
+
     if (selectedMode === 'lan') {
         if (lanFolderGroup) lanFolderGroup.classList.remove('hidden');
         if (folderInput) folderInput.setAttribute('required', 'required');
@@ -3059,13 +3992,13 @@ if (openAddModalBtn && addModal) {
         document.getElementById('edit-printer-id').value = '';
         document.getElementById('modal-title').innerText = typeof t === 'function' ? t('modal.add_printer_title') : 'Yeni Yazıcı Ekle';
         document.getElementById('modal-submit-btn').innerText = typeof t === 'function' ? t('modal.add_submit') : 'Yazıcıyı Ekle';
-        
+
         // Reset to default connection mode (online)
         const onlineRadio = document.querySelector('input[name="printer-mode"][value="online"]');
         if (onlineRadio) onlineRadio.checked = true;
         const logFolderInput = document.getElementById('printer-log-folder');
         if (logFolderInput) logFolderInput.value = path.join(userDataPath, 'logs');
-        
+
         toggleModeFields();
         addModal.classList.remove('hidden');
     });
@@ -3141,6 +4074,36 @@ if (analysisResultsModal) {
     });
 }
 
+// Detailed Analysis Button Handler
+const analysisShowFullBtn = document.getElementById('analysis-show-full-btn');
+if (analysisShowFullBtn) {
+    analysisShowFullBtn.addEventListener('click', () => {
+        // Get the current content from modal
+        const structuredContent = document.getElementById('analysis-results-structured');
+        const preContent = document.getElementById('analysis-results-pre');
+        const detailedContent = document.getElementById('detailed-analysis-content');
+
+        if (detailedContent) {
+            // Copy the structured content (which is visible)
+            if (structuredContent) {
+                detailedContent.innerHTML = structuredContent.innerHTML;
+            } else if (preContent && !preContent.classList.contains('hidden')) {
+                detailedContent.innerHTML = preContent.outerHTML;
+            }
+        }
+
+        // Close modal and open detailed view
+        closeAnalysisResultsModal();
+        showDetailedAnalysis();
+    });
+}
+
+// Detailed Analysis Close Button
+const detailedAnalysisCloseBtn = document.getElementById('detailed-analysis-close-btn');
+if (detailedAnalysisCloseBtn) {
+    detailedAnalysisCloseBtn.addEventListener('click', closeDetailedAnalysis);
+}
+
 // Close modals on Escape key
 document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
@@ -3199,7 +4162,7 @@ window.openEditPrinterModal = function (id) {
     if (folderInput) {
         folderInput.value = p.logFolderPath || '';
     }
-    
+
     toggleModeFields();
 
     if (addModal) {
@@ -3277,7 +4240,7 @@ if (addPrinterForm) {
                 logFolderPath: mode === 'lan' ? logFolderPath : ''
             };
             printersState.push(newPrinter);
-            
+
             // Create folder if LAN mode
             if (newPrinter.mode === 'lan' && newPrinter.logFolderPath) {
                 createPrinterFolderAndLog(newPrinter, 'Yazıcı eklendi (LAN Modu).');
@@ -3343,7 +4306,7 @@ async function fetchKlipperData(p) {
                     const data = await statsRes.json();
                     if (data && data.result) {
                         const r = data.result;
-                        
+
                         // Handle both object and primitive types for system_cpu_usage / cpu_usage
                         let cpuVal = undefined;
                         let cpuObj = null;
@@ -3380,14 +4343,14 @@ async function fetchKlipperData(p) {
                                 cpuVal = totalCoresCpu / coreCount;
                             }
                         }
-                        
+
                         if (cpuVal !== undefined && cpuVal !== null) {
                             const parsedCpu = parseFloat(cpuVal);
                             if (!isNaN(parsedCpu)) {
                                 p.cpuUsage = Math.max(2, Math.round(parsedCpu));
                             }
                         }
-                        
+
                         if (r.system_memory && r.system_memory.total && r.system_memory.available) {
                             const tot = parseFloat(r.system_memory.total);
                             const avail = parseFloat(r.system_memory.available);
@@ -3408,7 +4371,7 @@ async function fetchKlipperData(p) {
                 const gcodesUrl = getMoonrakerUrl(address, '/server/files/directory', 'path=gcodes');
                 const gcodesRes = await fetch(gcodesUrl, { signal: controller2.signal });
                 clearTimeout(timeoutId2);
-                
+
                 let diskDataFetched = false;
                 if (gcodesRes.ok) {
                     const data = await gcodesRes.json();
@@ -3421,7 +4384,7 @@ async function fetchKlipperData(p) {
                         }
                     }
                 }
-                
+
                 // Fallback to legacy disk_usage endpoint if first method did not succeed
                 if (!diskDataFetched) {
                     const controllerFallback = new AbortController();
@@ -3848,7 +4811,7 @@ function getTimelapseForJob(pId, filename, jobEndTime = null) {
         // Fallback: find the video with the closest modification time (difference < 15 mins)
         let bestMatch = null;
         let minDiff = Infinity;
-        
+
         matches.forEach(f => {
             if (f.modified) {
                 const diff = Math.abs(f.modified - jobEndTime);
@@ -3858,7 +4821,7 @@ function getTimelapseForJob(pId, filename, jobEndTime = null) {
                 }
             }
         });
-        
+
         if (bestMatch) return bestMatch;
     }
 
@@ -4258,10 +5221,38 @@ function renderAllProjects() {
                 </svg>
             </button>`;
 
-            // Page numbers
-            for (let i = 1; i <= totalPages; i++) {
+            // ── Dynamic Page Numbers (Max 5-6 visible numbers) ──────────────────
+            const maxVisiblePages = 5; // Yan yana görünecek maksimum numara sayısı
+            let startPage = Math.max(1, projectsCurrentPage - Math.floor(maxVisiblePages / 2));
+            let endPage = startPage + maxVisiblePages - 1;
+
+            if (endPage > totalPages) {
+                endPage = totalPages;
+                startPage = Math.max(1, endPage - maxVisiblePages + 1);
+            }
+
+            // İlk sayfayı ve gerekirse '...' ekle
+            if (startPage > 1) {
+                const activeClass = 1 === projectsCurrentPage ? ' active' : '';
+                pagHtml += `<button class="pag-btn num-btn${activeClass}" data-page="1">1</button>`;
+                if (startPage > 2) {
+                    pagHtml += `<span class="pag-ellipsis" style="padding: 0 4px; color: var(--text-muted);">...</span>`;
+                }
+            }
+
+            // Orta kısımda dinamik numaraları bas (Maksimum 5 adet)
+            for (let i = startPage; i <= endPage; i++) {
                 const activeClass = i === projectsCurrentPage ? ' active' : '';
                 pagHtml += `<button class="pag-btn num-btn${activeClass}" data-page="${i}">${i}</button>`;
+            }
+
+            // Son sayfayı ve gerekirse '...' ekle
+            if (endPage < totalPages) {
+                if (endPage < totalPages - 1) {
+                    pagHtml += `<span class="pag-ellipsis" style="padding: 0 4px; color: var(--text-muted);">...</span>`;
+                }
+                const activeClass = totalPages === projectsCurrentPage ? ' active' : '';
+                pagHtml += `<button class="pag-btn num-btn${activeClass}" data-page="${totalPages}">${totalPages}</button>`;
             }
 
             // Next button
@@ -4367,7 +5358,6 @@ async function updateDashboardProjects() {
                                 size: metadata.size || 0,
                                 modified: job.end_time || job.start_time || Date.now() / 1000,
                                 estimatedTime: metadata.estimated_time || job.print_duration || 0,
-                                filamentTotal: job.filament_used || 0,
                                 thumbnailUrl: thumbnailUrl,
                                 printerId: p.id,
                                 printerName: p.name,
@@ -4442,7 +5432,6 @@ async function updateDashboardProjects() {
                                         size: file.size || 0,
                                         modified: file.modified,
                                         estimatedTime: metadata.estimated_time || 0,
-                                        filamentTotal: metadata.filament_total || 0,
                                         thumbnailUrl: thumbnailUrl,
                                         printerId: p.id,
                                         printerName: p.name,
@@ -4463,7 +5452,6 @@ async function updateDashboardProjects() {
                                         size: file.size || 0,
                                         modified: file.modified,
                                         estimatedTime: 0,
-                                        filamentTotal: 0,
                                         thumbnailUrl: '',
                                         printerId: p.id,
                                         printerName: p.name,
@@ -4525,7 +5513,6 @@ async function updateDashboardProjects() {
                         size: 0,
                         modified: Date.now() / 1000 + 1000, // force it to be at the top
                         estimatedTime: estTime,
-                        filamentTotal: 0,
                         thumbnailUrl: thumbnailUrl,
                         printerId: p.id,
                         printerName: p.name,
@@ -4809,8 +5796,13 @@ setInterval(async () => {
             if (klipperStatus.print_stats) {
                 p.file = klipperStatus.print_stats.filename || '-';
 
-                const duration = klipperStatus.print_stats.print_duration || 0;
+                p.printDuration = klipperStatus.print_stats.print_duration || 0;
+                p.totalDuration = klipperStatus.print_stats.total_duration || 0;
+
+                const duration = p.printDuration;
                 const progress = klipperStatus.virtual_sdcard ? klipperStatus.virtual_sdcard.progress : 0;
+
+
 
                 if (p.status === 'printing' && progress > 0.01) {
                     const totalSecs = (duration / progress) - duration;
@@ -4836,23 +5828,18 @@ setInterval(async () => {
 
                 // ── Print status transitions ──────────────────────────────
                 if (prevStatus !== 'printing' && curStatus === 'printing') {
-                    if (prevStatus === 'paused') {
-                        addNotification('resume', 'Baskı Sürdürüldü', `${p.name}: ${curFile}`);
-                        logPrinterEvent(p, 'status', `Baskı Sürdürüldü - Dosya: ${curFile}`);
-                    } else {
-                        addNotification('start', 'Baskı Başladı', `${p.name}: ${curFile}`);
-                        logPrinterEvent(p, 'status', `Baskı Başladı - Dosya: ${curFile}`);
-                    }
+                    const isResume = prevStatus === 'paused' && !snap.pendingNewPrint;
+                    handlePrintStartTransition(p, snap, prevStatus, curFile, isResume);
                 } else if (prevStatus === 'printing' && curStatus === 'paused') {
                     addNotification('pause', 'Baskı Duraklatıldı', `${p.name}: ${curFile}`);
                     logPrinterEvent(p, 'status', `Baskı Duraklatıldı - Dosya: ${curFile}`);
                 } else if ((prevStatus === 'printing' || prevStatus === 'paused') && curStatus === 'idle') {
                     if (snap.progress >= 98) {
                         addNotification('complete', 'Baskı Tamamlandı', `${p.name}: ${prevFile}`);
-                        logPrinterEvent(p, 'status', `Baskı Tamamlandı - Dosya: ${prevFile}`);
-                    } else {
+                        markPrintSessionCompleted(p, prevFile, snap.progress || 100);
+                    } else if (!snap.pendingNewPrint) {
                         addNotification('cancel', 'Baskı İptal Edildi', `${p.name}: ${prevFile} (%${Math.round(snap.progress)})`);
-                        logPrinterEvent(p, 'status', `Baskı İptal Edildi - Dosya: ${prevFile} (%${Math.round(snap.progress)})`);
+                        markPrintSessionCancelled(p, prevFile, snap.progress || 0);
                     }
                 }
 
@@ -4867,20 +5854,29 @@ setInterval(async () => {
                     }
                 }
 
-                // ── Periodic progress logs (every 5%) ──────────────────────
+                // ── Periodic progress logs (every 1%) ──────────────────────
                 if (p.status === 'printing') {
                     const curProg = Math.floor(p.progress || 0);
                     if (snap.lastLoggedProgress === undefined) {
+                        snap.lastLoggedProgress = -1;
+                    }
+                    if (snap.lastLoggedProgress >= 0 && curProg < snap.lastLoggedProgress) {
                         snap.lastLoggedProgress = -1;
                     }
                     if (snap.lastLoggedProgress === -1 || (curProg - snap.lastLoggedProgress >= 1)) {
                         snap.lastLoggedProgress = curProg;
                         logPrinterEvent(p, 'progress', buildProgressString(p, curProg));
                     }
-                } else {
+                } else if (p.status !== 'paused') {
                     snap.lastLoggedProgress = -1;
                 }
             }
+            // Update snapshot print stats when active
+            if (p.status === 'printing' || p.status === 'paused') {
+                if (p.printDuration > 0) snap.lastPrintDuration = p.printDuration;
+                if (p.totalDuration > 0) snap.lastTotalDuration = p.totalDuration;
+            }
+
             // Update snapshot
             snap.status = p.status;
             snap.file = p.file || '-';
@@ -5119,23 +6115,18 @@ setInterval(async () => {
 
                     // ── Print status transitions ──────────────────────────
                     if (prevStatus !== 'printing' && curStatus === 'printing') {
-                        if (prevStatus === 'paused') {
-                            addNotification('resume', 'Baskı Sürdürüldü', `${p.name}: ${curFile}`);
-                            logPrinterEvent(p, 'status', `Baskı Sürdürüldü - Dosya: ${curFile}`);
-                        } else {
-                            addNotification('start', 'Baskı Başladı', `${p.name}: ${curFile}`);
-                            logPrinterEvent(p, 'status', `Baskı Başladı - Dosya: ${curFile}`);
-                        }
+                        const isResume = prevStatus === 'paused' && !snap.pendingNewPrint;
+                        handlePrintStartTransition(p, snap, prevStatus, curFile, isResume);
                     } else if (prevStatus === 'printing' && curStatus === 'paused') {
                         addNotification('pause', 'Baskı Duraklatıldı', `${p.name}: ${curFile}`);
                         logPrinterEvent(p, 'status', `Baskı Duraklatıldı - Dosya: ${curFile}`);
                     } else if ((prevStatus === 'printing' || prevStatus === 'paused') && curStatus === 'idle') {
                         if (snap.progress >= 98) {
                             addNotification('complete', 'Baskı Tamamlandı', `${p.name}: ${prevFile}`);
-                            logPrinterEvent(p, 'status', `Baskı Tamamlandı - Dosya: ${prevFile}`);
-                        } else {
+                            markPrintSessionCompleted(p, prevFile, snap.progress || 100);
+                        } else if (!snap.pendingNewPrint) {
                             addNotification('cancel', 'Baskı İptal Edildi', `${p.name}: ${prevFile} (%${Math.round(snap.progress)})`);
-                            logPrinterEvent(p, 'status', `Baskı İptal Edildi - Dosya: ${prevFile} (%${Math.round(snap.progress)})`);
+                            markPrintSessionCancelled(p, prevFile, snap.progress || 0);
                         }
                     }
 
@@ -5150,17 +6141,20 @@ setInterval(async () => {
                         }
                     }
 
-                    // ── Periodic progress logs (every 5%) ──────────────────────
+                    // ── Periodic progress logs (every 1%) ──────────────────────
                     if (p.status === 'printing') {
                         const curProg = Math.floor(p.progress || 0);
                         if (snap.lastLoggedProgress === undefined) {
+                            snap.lastLoggedProgress = -1;
+                        }
+                        if (snap.lastLoggedProgress >= 0 && curProg < snap.lastLoggedProgress) {
                             snap.lastLoggedProgress = -1;
                         }
                         if (snap.lastLoggedProgress === -1 || (curProg - snap.lastLoggedProgress >= 1)) {
                             snap.lastLoggedProgress = curProg;
                             logPrinterEvent(p, 'progress', buildProgressString(p, curProg));
                         }
-                    } else {
+                    } else if (p.status !== 'paused') {
                         snap.lastLoggedProgress = -1;
                     }
                 }
@@ -5214,6 +6208,12 @@ setInterval(async () => {
     if (now - lastProjectsUpdate > 15000) {
         lastProjectsUpdate = now;
         updateDashboardProjects();
+    }
+
+    // Query printer total print times every 15 seconds
+    if (now - lastTotalDurationUpdate > 15000) {
+        lastTotalDurationUpdate = now;
+        loadAllPrinterTotalDurations().then(() => renderPrinters());
     }
 
     // Update webhook warning alerts
@@ -5368,7 +6368,6 @@ applyTranslations();
 // ─── WORKSPACE (Workshop Statistics & Calculations) ────────────────────────
 async function loadWorkspaceStats() {
     let totalSeconds = 0;
-    let totalFilamentMeters = 0;
     let totalJobs = 0;
     let successfulJobs = 0;
 
@@ -5381,7 +6380,6 @@ async function loadWorkspaceStats() {
     // Loop through printers in printersState
     const fetchPromises = printersState.map(async (p) => {
         let printTime = 0;
-        let filamentUsed = 0;
         let jobsCount = 0;
         let successRate = 0;
         let hasData = false;
@@ -5400,7 +6398,6 @@ async function loadWorkspaceStats() {
                     if (data && data.result && data.result.job_totals) {
                         const t = data.result.job_totals;
                         printTime = t.total_print_time || 0; // seconds
-                        filamentUsed = (t.total_filament_used || 0) / 1000; // convert mm to meters
                         jobsCount = t.total_jobs || 0;
 
                         try {
@@ -5420,58 +6417,55 @@ async function loadWorkspaceStats() {
                                     // Collect timestamps for chart
                                     jobs.forEach(j => {
                                         if (j.start_time) {
-                                            allChartJobs.push({ 
-                                                ts: j.start_time, 
+                                            allChartJobs.push({
+                                                ts: j.start_time,
                                                 status: j.status,
                                                 duration: j.print_duration || 0,
-                                                filament: j.filament_used || 0,
                                                 printerId: p.id,
                                                 filename: j.filename || 'unknown.gcode'
                                             });
                                         }
                                     });
                                 }
-                             }
-                         } catch (e) {
-                             successRate = 95; // realistic fallback
-                             successfulJobs += Math.round(jobsCount * 0.95);
-                         }
- 
-                         hasData = true;
-                     }
-                 }
-             } catch (e) {
-                 console.error(`Failed to fetch stats for printer ${p.name} from ${host}:`, e);
-             }
-         }
- 
-         // Fallback to mock / stored stats if no data fetched (e.g. printer is offline or simulated)
-         if (!hasData) {
-             const num = parseInt(p.id.replace(/\D/g, ''), 10) || 12345;
-             printTime = ((num % 120) + 12) * 3600 + (num % 60) * 60; // hours and minutes (min 12h)
-             filamentUsed = (num % 450) + 42; // meters (between 42m and 492m)
-             jobsCount = (num % 25) + 6; // jobs (between 6 and 31)
-             successRate = 90 + (num % 10); // success rate (90-99%)
-             successfulJobs += Math.round(jobsCount * (successRate / 100));
- 
-             // Generate mock chart data spread over last 90 days
-             const now = Date.now() / 1000;
-             const mockGcodes = ['Gearbox.gcode', 'Housing_v3.gcode', 'Bracket_v2.gcode', 'benchy.gcode', 'extruder_mount.gcode', 'spool_holder.gcode', 'cable_clip.gcode', 'knob_cover.gcode'];
-             for (let i = 0; i < jobsCount; i++) {
-                 const daysAgo = Math.random() * 90;
-                 allChartJobs.push({
-                     ts: now - daysAgo * 86400,
-                     status: Math.random() < (successRate / 100) ? 'completed' : 'failed',
-                     duration: (Math.random() * 6 + 1) * 3600, // 1 to 7 hours in seconds
-                         filament: (Math.random() * 80 + 10) * 1000, // 10 to 90 meters in mm
-                      printerId: p.id,
-                      filename: mockGcodes[Math.floor(Math.random() * mockGcodes.length)]
-                 });
-             }
-         }
+                            }
+                        } catch (e) {
+                            successRate = 95; // realistic fallback
+                            successfulJobs += Math.round(jobsCount * 0.95);
+                        }
+
+                        hasData = true;
+                    }
+                }
+            } catch (e) {
+                console.error(`Failed to fetch stats for printer ${p.name} from ${host}:`, e);
+            }
+        }
+
+        // Fallback to mock / stored stats if no data fetched (e.g. printer is offline or simulated)
+        if (!hasData) {
+            const num = parseInt(p.id.replace(/\D/g, ''), 10) || 12345;
+            const localTotalMins = printerTotalDurations[p.id] || 0;
+            printTime = localTotalMins > 0 ? (localTotalMins * 60) : (((num % 120) + 12) * 3600 + (num % 60) * 60); // hours and minutes (min 12h)
+            jobsCount = (num % 25) + 6; // jobs (between 6 and 31)
+            successRate = 90 + (num % 10); // success rate (90-99%)
+            successfulJobs += Math.round(jobsCount * (successRate / 100));
+
+            // Generate mock chart data spread over last 90 days
+            const now = Date.now() / 1000;
+            const mockGcodes = ['Gearbox.gcode', 'Housing_v3.gcode', 'Bracket_v2.gcode', 'benchy.gcode', 'extruder_mount.gcode', 'spool_holder.gcode', 'cable_clip.gcode', 'knob_cover.gcode'];
+            for (let i = 0; i < jobsCount; i++) {
+                const daysAgo = Math.random() * 90;
+                allChartJobs.push({
+                    ts: now - daysAgo * 86400,
+                    status: Math.random() < (successRate / 100) ? 'completed' : 'failed',
+                    duration: (Math.random() * 6 + 1) * 3600, // 1 to 7 hours in seconds
+                    printerId: p.id,
+                    filename: mockGcodes[Math.floor(Math.random() * mockGcodes.length)]
+                });
+            }
+        }
 
         totalSeconds += printTime;
-        totalFilamentMeters += filamentUsed;
         totalJobs += jobsCount;
 
         // Render this printer's card in the list
@@ -5487,10 +6481,6 @@ async function loadWorkspaceStats() {
                     <div class="wprinter-substat">
                         <span class="wprinter-substat-label">${t('workspace.stat_total_time')}</span>
                         <span class="wprinter-substat-val">${Math.round(printTime / 3600)} ${t('workspace.hours')}</span>
-                    </div>
-                    <div class="wprinter-substat">
-                        <span class="wprinter-substat-label">${t('workspace.stat_total_filament')}</span>
-                        <span class="wprinter-substat-val">${Math.round(filamentUsed)} m <span style="font-size: 10px; color: var(--text-muted); font-weight: normal; margin-left: 2px;">(~${((filamentUsed * 2.98) / 1000).toFixed(1)} kg)</span></span>
                     </div>
                     <div class="wprinter-substat">
                         <span class="wprinter-substat-label">${t('workspace.stat_success_rate')}</span>
@@ -5512,18 +6502,10 @@ async function loadWorkspaceStats() {
     const avgSuccessRate = totalJobs > 0 ? Math.round((successfulJobs / totalJobs) * 100) : 100;
 
     const valTimeEl = document.getElementById('wstat-val-time');
-    const valFilamentEl = document.getElementById('wstat-val-filament');
-    const valFilamentUnitEl = document.getElementById('wstat-val-filament-unit');
     const valJobsEl = document.getElementById('wstat-val-jobs');
     const valSuccessEl = document.getElementById('wstat-val-success');
 
     if (valTimeEl) valTimeEl.innerText = totalHours.toLocaleString();
-    if (valFilamentEl) valFilamentEl.innerText = Math.round(totalFilamentMeters).toLocaleString();
-    if (valFilamentUnitEl) {
-        const filamentKg = (totalFilamentMeters * 2.98) / 1000;
-        const unitLabel = currentLang === 'tr' ? 'metre' : 'meters';
-        valFilamentUnitEl.innerText = `${unitLabel} (~${filamentKg.toFixed(1)} kg)`;
-    }
     if (valJobsEl) valJobsEl.innerText = totalJobs.toLocaleString();
     if (valSuccessEl) valSuccessEl.innerText = avgSuccessRate;
 
@@ -5538,19 +6520,19 @@ let _currentChartPeriod = '7d';
 function populatePrinterFilter() {
     const select = document.getElementById('stats-printer-select');
     if (!select) return;
-    
+
     const selectedVal = select.value || 'all';
-    
+
     // Clear and build options
     select.innerHTML = `<option value="all" data-i18n="workspace.filter_all_printers">${t('workspace.filter_all_printers') || 'Tüm Yazıcılar'}</option>`;
-    
+
     printersState.forEach(p => {
         const opt = document.createElement('option');
         opt.value = p.id;
         opt.innerText = p.name;
         select.appendChild(opt);
     });
-    
+
     // Restore selection
     if (Array.from(select.options).some(o => o.value === selectedVal)) {
         select.value = selectedVal;
@@ -5594,7 +6576,7 @@ function drawStatsChart(jobs, period) {
     // Filter jobs by selected printer
     const printerSelect = document.getElementById('stats-printer-select');
     const selectedPrinterId = printerSelect ? printerSelect.value : 'all';
-    
+
     let filteredJobs = jobs;
     if (selectedPrinterId !== 'all') {
         filteredJobs = jobs.filter(j => j.printerId === selectedPrinterId);
@@ -5686,19 +6668,15 @@ function drawStatsChart(jobs, period) {
     const jobsInPeriod = filteredJobs.filter(j => j.ts >= periodStart && j.ts <= now);
     const periodDurationSec = jobsInPeriod.reduce((sum, j) => sum + (j.duration || 0), 0);
     const periodDurationHours = Math.round(periodDurationSec / 3600);
-    const periodFilamentMeters = jobsInPeriod.reduce((sum, j) => sum + (j.filament || 0), 0) / 1000;
-    const periodFilamentKg = (periodFilamentMeters * 2.98) / 1000;
     const successRate = grandTotal > 0 ? Math.round((totalSuccess / grandTotal) * 100) : 100;
 
     // Update Bottom Metric Cards
     const elPeriodSuccess = document.getElementById('stats-period-success');
     const elPeriodTime = document.getElementById('stats-period-time');
-    const elPeriodFilament = document.getElementById('stats-period-filament');
     const elPeriodCount = document.getElementById('stats-period-count');
 
     if (elPeriodSuccess) elPeriodSuccess.innerText = successRate.toString();
     if (elPeriodTime) elPeriodTime.innerText = periodDurationHours.toLocaleString();
-    if (elPeriodFilament) elPeriodFilament.innerText = periodFilamentKg.toFixed(1);
     if (elPeriodCount) elPeriodCount.innerText = grandTotal.toLocaleString();
 
     // Update dynamic histogram title and rows
@@ -5782,13 +6760,13 @@ function drawStatsChart(jobs, period) {
     } else {
         // Draw segments with gaps and rounded caps
         ctx.lineCap = 'round';
-        
+
         // Cap extension angle in radians
         const capExtAngle = (strokeWidth / 2) / midRadius;
         // Small gap between the rounded caps of segments
-        const capGap = 0.08; 
-        const gapAngle = (capExtAngle * 2) + capGap; 
-        
+        const capGap = 0.08;
+        const gapAngle = (capExtAngle * 2) + capGap;
+
         const totalAngleForSegments = Math.PI * 2 - (gapAngle * 2);
         const successAngle = (totalSuccess / grandTotal) * totalAngleForSegments;
         const failAngle = (totalFail / grandTotal) * totalAngleForSegments;
@@ -5871,7 +6849,7 @@ function updateWebhookAlerts() {
         const stateText = hasShutdown ? 'SHUTDOWN' : 'ERROR';
         const machineWord = currentLang === 'tr' ? 'MAKİNE' : 'PRINTERS';
         const btnText = `${errorPrinters.length} ${machineWord}: ${stateText}`;
-        
+
         const btnTextEl = warningBtn.querySelector('.warning-btn-text');
         if (btnTextEl && btnTextEl.textContent !== btnText) {
             btnTextEl.textContent = btnText;
@@ -6175,45 +7153,45 @@ function parseGcode(text) {
     let currentX = 0;
     let currentY = 0;
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    
+
     const lines = text.split(/\r?\n/);
     const lineRegex = /^(G0|G1|G00|G01|G2|G3)\b/i;
     const xRegex = /X([\d.-]+)/i;
     const yRegex = /Y([\d.-]+)/i;
     const eRegex = /E([\d.-]+)/i;
-    
+
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i].trim();
         if (!line || line.startsWith(';')) continue;
-        
+
         const matchCmd = line.match(lineRegex);
         if (matchCmd) {
             const cmd = matchCmd[1].toUpperCase();
             const matchX = line.match(xRegex);
             const matchY = line.match(yRegex);
             const matchE = line.match(eRegex);
-            
+
             let nextX = matchX ? parseFloat(matchX[1]) : currentX;
             let nextY = matchY ? parseFloat(matchY[1]) : currentY;
-            
+
             if (matchX || matchY) {
                 const type = (cmd === 'G0' || cmd === 'G00') ? 'travel' : 'extrude';
-                
+
                 segments.push({ type, x1: currentX, y1: currentY, x2: nextX, y2: nextY });
-                
+
                 if (type === 'extrude') {
                     if (nextX < minX) minX = nextX;
                     if (nextX > maxX) maxX = nextX;
                     if (nextY < minY) minY = nextY;
                     if (nextY > maxY) maxY = nextY;
                 }
-                
+
                 currentX = nextX;
                 currentY = nextY;
             }
         }
     }
-    
+
     // If no extrusion coordinates were found, fall back to travel moves
     if (minX === Infinity) {
         segments.forEach(seg => {
@@ -6223,12 +7201,12 @@ function parseGcode(text) {
             if (seg.y2 > maxY) maxY = seg.y2;
         });
     }
-    
+
     // Prevent empty bounds
     if (minX === Infinity) {
         minX = 0; maxX = 220; minY = 0; maxY = 220;
     }
-    
+
     return {
         segments,
         bounds: { minX, maxX, minY, maxY }
@@ -6238,51 +7216,35 @@ function parseGcode(text) {
 function extractMetadataFromComments(text) {
     const meta = {
         time: '-',
-        filament: '-',
-        filamentType: 'PLA',
-        filamentWeight: '-',
         layers: '-',
         layerHeight: '-',
         objectHeight: '-'
     };
-    
+
     // Match printing time
     const timeMatch = text.match(/;\s*(?:estimated printing time|print time|print_time|total estimate time)\s*=\s*(.+)/i);
     if (timeMatch) {
         meta.time = timeMatch[1].trim();
     }
-    
-    // Match filament weight (e.g. 15.69g or 12.5g)
-    const weightMatch = text.match(/;\s*(?:total filament used|filament used|filament_used)(?:\s*\[g\])?\s*=\s*([\d.]+)\s*(?:g)?/i);
-    if (weightMatch) {
-        meta.filamentWeight = `${parseFloat(weightMatch[1]).toFixed(2)}g`;
-        meta.filament = meta.filamentWeight;
-    }
-    
-    // Match filament type (PLA, PETG, ABS, etc.)
-    const typeMatch = text.match(/;\s*(?:filament_type|filament type)\s*=\s*(.+)/i);
-    if (typeMatch) {
-        meta.filamentType = typeMatch[1].trim();
-    }
-    
+
     // Match layer height (e.g. 0.20mm)
     const layerHeightMatch = text.match(/;\s*(?:layer_height|layer height)\s*=\s*([\d.]+)/i);
     if (layerHeightMatch) {
         meta.layerHeight = `${parseFloat(layerHeightMatch[1]).toFixed(2)}mm`;
     }
-    
+
     // Match object height (e.g. 30.00mm)
     const objectHeightMatch = text.match(/;\s*(?:object_height|object height|height)\s*=\s*([\d.]+)/i);
     if (objectHeightMatch) {
         meta.objectHeight = `${parseFloat(objectHeightMatch[1]).toFixed(2)}mm`;
     }
-    
+
     // Match layers
     const layersMatch = text.match(/;\s*(?:total_layer_number|layers|layer_count)\s*=\s*(\d+)/i);
     if (layersMatch) {
         meta.layers = layersMatch[1].trim();
     }
-    
+
     return meta;
 }
 
@@ -6290,9 +7252,9 @@ function drawGcodeOnCanvas(canvasId, segments, bounds) {
     const canvas = document.getElementById(canvasId);
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
-    
+
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
+
     if (!segments || segments.length === 0) {
         ctx.fillStyle = '#888';
         ctx.font = '14px sans-serif';
@@ -6300,42 +7262,42 @@ function drawGcodeOnCanvas(canvasId, segments, bounds) {
         ctx.fillText(currentLang === 'tr' ? 'Çizilecek yol bulunamadı' : 'No paths to draw', canvas.width / 2, canvas.height / 2);
         return;
     }
-    
+
     const { minX, maxX, minY, maxY } = bounds;
     const dx = maxX - minX;
     const dy = maxY - minY;
-    
+
     const width = dx || 1;
     const height = dy || 1;
-    
+
     const padding = 20;
     const drawWidth = canvas.width - padding * 2;
     const drawHeight = canvas.height - padding * 2;
-    
+
     const scale = Math.min(drawWidth / width, drawHeight / height);
-    
+
     const offsetX = padding + (drawWidth - width * scale) / 2;
     const offsetY = padding + (drawHeight - height * scale) / 2;
-    
+
     const style = getComputedStyle(document.body);
     const accentColor = style.getPropertyValue('--accent').trim() || '#ff6b00';
-    
+
     const travelSegments = [];
     const extrudeSegments = [];
-    
+
     segments.forEach(seg => {
         const x1 = offsetX + (seg.x1 - minX) * scale;
         const y1 = canvas.height - (offsetY + (seg.y1 - minY) * scale);
         const x2 = offsetX + (seg.x2 - minX) * scale;
         const y2 = canvas.height - (offsetY + (seg.y2 - minY) * scale);
-        
+
         if (seg.type === 'travel') {
             travelSegments.push({ x1, y1, x2, y2 });
         } else {
             extrudeSegments.push({ x1, y1, x2, y2 });
         }
     });
-    
+
     if (travelSegments.length > 0) {
         ctx.beginPath();
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
@@ -6347,7 +7309,7 @@ function drawGcodeOnCanvas(canvasId, segments, bounds) {
         });
         ctx.stroke();
     }
-    
+
     if (extrudeSegments.length > 0) {
         ctx.beginPath();
         ctx.strokeStyle = accentColor;
@@ -6383,7 +7345,6 @@ function generateMockGcodePaths() {
         bounds: { minX: 50, maxX: 250, minY: 50, maxY: 250 },
         meta: {
             time: currentLang === 'tr' ? '1s 25dk' : '1h 25m',
-            filament: '14.2 g',
             layers: '180'
         }
     };
@@ -6414,12 +7375,12 @@ function generateInjectedGcodeHeader(settings) {
     let inject = '; === INJECTED PRINT OPTIONS BY LAYERSTECH DASHBOARD ===\n';
     inject += `; Selected Extruder: ${settings.extruder}\n`;
     inject += `T${settings.extruder.replace('T', '')}\n`;
-    
+
     if (settings.bedLeveling !== 'none') {
         inject += `; Bed Leveling Option: ${settings.bedLeveling}\n`;
         inject += `BED_MESH_PROFILE LOAD=${settings.bedLeveling}\n`;
     }
-    
+
     if (settings.spaghetti) {
         inject += '; Spaghetti Detection: Enabled\n';
         inject += 'SET_SPAGHETTI_DETECTION ENABLE=1\n';
@@ -6427,24 +7388,24 @@ function generateInjectedGcodeHeader(settings) {
         inject += '; Spaghetti Detection: Disabled\n';
         inject += 'SET_SPAGHETTI_DETECTION ENABLE=0\n';
     }
-    
+
     if (settings.nozzleClean) {
         inject += '; Pre-print Nozzle Cleaning: Enabled\n';
         inject += 'CLEAN_NOZZLE\n';
     }
-    
+
     if (settings.timelapseComp) {
         inject += '; Timelapse Compensation: Enabled\n';
         inject += 'SET_TIMELAPSE_COMPENSATION ENABLE=1\n';
     }
-    
+
     inject += '; ====================================================\n\n';
     return inject;
 }
 
 function generateInjectedGcodeFooter(settings) {
     if (!settings.postShutdown) return '';
-    
+
     let inject = '\n\n; === INJECTED POST-PRINT AUTO SHUTDOWN ===\n';
     inject += `; Auto Shutdown Delay: ${settings.shutdownDelay} minutes\n`;
     inject += `SHUTDOWN_AFTER_PRINT DELAY=${parseInt(settings.shutdownDelay) * 60}\n`;
@@ -6481,28 +7442,25 @@ function setSafeText(id, text) {
 async function openGcodePreview(printerId, fileOrFilename) {
     const modal = document.getElementById('gcode-preview-modal');
     if (!modal) return;
-    
+
     modal.classList.remove('hidden');
     const loadingOverlay = document.getElementById('gcode-preview-loading');
     if (loadingOverlay) loadingOverlay.style.display = 'flex';
-    
+
     setSafeText('gcode-meta-name', '-');
     setSafeText('gcode-meta-size', '-');
-    setSafeText('gcode-meta-filament', '-');
     setSafeText('gcode-meta-time', '-');
     setSafeText('gcode-meta-layers', '-');
     setSafeText('gcode-meta-layer-height', '-');
     setSafeText('gcode-meta-object-height', '-');
-    setSafeText('gcode-meta-filament-type', 'PLA');
-    setSafeText('gcode-meta-filament-weight', '-');
-    
+
     const canvasId = 'gcode-preview-canvas';
-    
+
     const printer = printersState.find(p => p.id === printerId);
     if (printer) {
         setSafeText('gcode-preview-printer-ip', printer.address || 'Serial / Local');
     }
-    
+
     // Bind printer IP edit button once
     const ipEditBtn = document.getElementById('edit-preview-printer-ip-btn');
     if (ipEditBtn) {
@@ -6522,73 +7480,66 @@ async function openGcodePreview(printerId, fileOrFilename) {
             }
         });
     }
-    
+
     const canvas = document.getElementById(canvasId);
     if (canvas) {
         const ctx = canvas.getContext('2d');
         ctx.clearRect(0, 0, canvas.width, canvas.height);
     }
-    
+
     try {
         let name = '';
         let sizeText = '-';
-        let filamentText = '-';
         let timeText = '-';
         let layersText = '-';
         let gcodeText = '';
         let parsed = { segments: [], bounds: { minX: 0, maxX: 1, minY: 0, maxY: 1 } };
-        
+
         if (fileOrFilename instanceof File) {
             const file = fileOrFilename;
             name = file.name;
             sizeText = `${(file.size / (1024 * 1024)).toFixed(2)} MB`;
-            
+
             const firstChunk = file.slice(0, 1500000);
             const firstText = await readBlobAsText(firstChunk);
             gcodeText = firstText;
-            
+
             const lastStart = Math.max(0, file.size - 100000);
             const lastChunk = file.slice(lastStart, file.size);
             const lastText = await readBlobAsText(lastChunk);
-            
+
             const meta = extractMetadataFromComments(lastText);
-            filamentText = meta.filament;
             timeText = meta.time;
             layersText = meta.layers;
-            
+
             setSafeText('gcode-meta-layer-height', meta.layerHeight);
             setSafeText('gcode-meta-object-height', meta.objectHeight);
-            setSafeText('gcode-meta-filament-type', meta.filamentType);
-            setSafeText('gcode-meta-filament-weight', meta.filamentWeight);
-            
+
             parsed = parseGcode(gcodeText);
         } else {
             name = fileOrFilename;
-            
+
             if (printerId === 'mock' || !printer || !printer.address || printer.status === 'offline') {
                 const mockData = generateMockGcodePaths();
                 setSafeText('gcode-meta-name', name);
                 setSafeText('gcode-meta-size', '12.4 MB');
-                setSafeText('gcode-meta-filament', mockData.meta.filament);
                 setSafeText('gcode-meta-time', mockData.meta.time);
                 setSafeText('gcode-meta-layers', mockData.meta.layers);
                 setSafeText('gcode-meta-layer-height', '0.20mm');
                 setSafeText('gcode-meta-object-height', '30.00mm');
-                setSafeText('gcode-meta-filament-type', 'PLA');
-                setSafeText('gcode-meta-filament-weight', '15.69g');
-                
+
                 drawGcodeOnCanvas(canvasId, mockData.segments, mockData.bounds);
                 if (loadingOverlay) loadingOverlay.style.display = 'none';
-                
+
                 setupPreviewFooter(printerId, fileOrFilename, false);
                 return;
             }
-            
+
             let host = printer.address;
             if (!host.includes(':') && !printer.address.toLowerCase().startsWith('com') && !printer.address.toLowerCase().startsWith('/dev/')) {
                 host = `${printer.address}:7125`;
             }
-            
+
             try {
                 const metaRes = await fetch(`http://${host}/server/files/metadata?filename=${encodeURIComponent(name)}`);
                 if (metaRes.ok) {
@@ -6597,38 +7548,24 @@ async function openGcodePreview(printerId, fileOrFilename) {
                         const res = data.result;
                         sizeText = res.size ? `${(res.size / (1024 * 1024)).toFixed(2)} MB` : '-';
                         timeText = formatTime(res.estimated_time);
-                        if (res.filament_total !== undefined) {
-                            filamentText = `${(res.filament_total / 1000).toFixed(2)} m`;
-                        }
                         if (res.layer_count !== undefined) {
                             layersText = res.layer_count;
                         } else if (res.object_height && res.layer_height) {
                             layersText = Math.round(res.object_height / res.layer_height);
                         }
-                        
+
                         if (res.layer_height !== undefined) {
                             setSafeText('gcode-meta-layer-height', `${parseFloat(res.layer_height).toFixed(2)}mm`);
                         }
                         if (res.object_height !== undefined) {
                             setSafeText('gcode-meta-object-height', `${parseFloat(res.object_height).toFixed(2)}mm`);
                         }
-                        
-                        const filamentType = res.filament_type || 'PLA';
-                        setSafeText('gcode-meta-filament-type', filamentType);
-                        
-                        let weightStr = '-';
-                        if (res.filament_weight_total !== undefined) {
-                            weightStr = `${res.filament_weight_total.toFixed(2)}g`;
-                        } else if (res.filament_total !== undefined) {
-                            weightStr = `${((res.filament_total / 1000) * 3.0).toFixed(2)}g`;
-                        }
-                        setSafeText('gcode-meta-filament-weight', weightStr);
                     }
                 }
             } catch (e) {
                 console.warn('Failed to fetch remote metadata:', e);
             }
-            
+
             try {
                 const fileRes = await fetch(`http://${host}/server/files/gcodes/${encodeURIComponent(name)}`, {
                     headers: {
@@ -6645,16 +7582,15 @@ async function openGcodePreview(printerId, fileOrFilename) {
                 console.error('Failed to fetch remote G-code:', e);
             }
         }
-        
+
         setSafeText('gcode-meta-name', name);
         setSafeText('gcode-meta-size', sizeText);
-        setSafeText('gcode-meta-filament', filamentText);
         setSafeText('gcode-meta-time', timeText);
         setSafeText('gcode-meta-layers', layersText);
-        
+
         drawGcodeOnCanvas(canvasId, parsed.segments, parsed.bounds);
         setupPreviewFooter(printerId, fileOrFilename, fileOrFilename instanceof File);
-        
+
     } catch (err) {
         console.error('Error in openGcodePreview:', err);
     } finally {
@@ -6667,25 +7603,25 @@ function setupPreviewFooter(printerId, fileOrFilename, isLocal) {
     const exportBtn = document.getElementById('gcode-btn-export');
     const sendBtn = document.getElementById('gcode-btn-send');
     const printBtn = document.getElementById('gcode-btn-print');
-    
+
     if (!cancelBtn || !exportBtn || !sendBtn || !printBtn) return;
-    
+
     // Clear old event listeners by cloning
     const newCancelBtn = cancelBtn.cloneNode(true);
     const newExportBtn = exportBtn.cloneNode(true);
     const newSendBtn = sendBtn.cloneNode(true);
     const newPrintBtn = printBtn.cloneNode(true);
-    
+
     cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
     exportBtn.parentNode.replaceChild(newExportBtn, exportBtn);
     sendBtn.parentNode.replaceChild(newSendBtn, sendBtn);
     printBtn.parentNode.replaceChild(newPrintBtn, printBtn);
-    
+
     // Bind Cancel
     newCancelBtn.addEventListener('click', () => {
         document.getElementById('gcode-preview-modal').classList.add('hidden');
     });
-    
+
     // Bind Export
     newExportBtn.addEventListener('click', async () => {
         const settings = {
@@ -6697,7 +7633,7 @@ function setupPreviewFooter(printerId, fileOrFilename, isLocal) {
             shutdownDelay: document.getElementById('gcode-option-shutdown-delay').value,
             extruder: 'T1'
         };
-        
+
         const filename = fileOrFilename instanceof File ? fileOrFilename.name : fileOrFilename;
         const result = await ipcRenderer.invoke('save-file-dialog', filename);
         if (result && result.filePath) {
@@ -6706,7 +7642,7 @@ function setupPreviewFooter(printerId, fileOrFilename, isLocal) {
                 if (loadingOverlay) loadingOverlay.style.display = 'flex';
                 const header = generateInjectedGcodeHeader(settings);
                 const footer = generateInjectedGcodeFooter(settings);
-                
+
                 if (isLocal) {
                     // Combine blob and write file to chosen path
                     const combinedBlob = new Blob([header, fileOrFilename, footer], { type: 'text/plain' });
@@ -6739,7 +7675,7 @@ function setupPreviewFooter(printerId, fileOrFilename, isLocal) {
             }
         }
     });
-    
+
     // Bind Send
     newSendBtn.addEventListener('click', async () => {
         const settings = {
@@ -6752,7 +7688,7 @@ function setupPreviewFooter(printerId, fileOrFilename, isLocal) {
             extruder: 'T1'
         };
         document.getElementById('gcode-preview-modal').classList.add('hidden');
-        
+
         if (isLocal) {
             const printer = printersState.find(p => p.id === printerId);
             if (printer && printer.address && printerId !== 'mock') {
@@ -6773,12 +7709,12 @@ function setupPreviewFooter(printerId, fileOrFilename, isLocal) {
                     // Send settings setup Gcode scripts first
                     const headerGcode = generateInjectedGcodeHeader(settings);
                     await sendKlipperGcodeScript(printer, headerGcode);
-                    
+
                     const footerGcode = generateInjectedGcodeFooter(settings);
                     if (footerGcode) {
                         await sendKlipperGcodeScript(printer, footerGcode);
                     }
-                    
+
                     // Select file on virtual SD card
                     const url = `http://${host}/printer/gcode/script?script=SDCARD_SELECT_FILE FILENAME=${encodeURIComponent(fileOrFilename)}`;
                     const res = await fetch(url, { method: 'POST' });
@@ -6796,7 +7732,7 @@ function setupPreviewFooter(printerId, fileOrFilename, isLocal) {
             }
         }
     });
-    
+
     // Bind Print
     newPrintBtn.addEventListener('click', async () => {
         const settings = {
@@ -6809,7 +7745,7 @@ function setupPreviewFooter(printerId, fileOrFilename, isLocal) {
             extruder: 'T1'
         };
         document.getElementById('gcode-preview-modal').classList.add('hidden');
-        
+
         if (isLocal) {
             const printer = printersState.find(p => p.id === printerId);
             if (printer && printer.address && printerId !== 'mock') {
@@ -6821,7 +7757,7 @@ function setupPreviewFooter(printerId, fileOrFilename, isLocal) {
             // Remote print
             const printer = printersState.find(p => p.id === printerId);
             if (!printer) return;
-            
+
             if (printer.address && printerId !== 'mock') {
                 let host = printer.address;
                 if (!host.includes(':') && !printer.address.toLowerCase().startsWith('com') && !printer.address.toLowerCase().startsWith('/dev/')) {
@@ -6831,12 +7767,12 @@ function setupPreviewFooter(printerId, fileOrFilename, isLocal) {
                     // Send settings setup Gcode scripts first
                     const headerGcode = generateInjectedGcodeHeader(settings);
                     await sendKlipperGcodeScript(printer, headerGcode);
-                    
+
                     const footerGcode = generateInjectedGcodeFooter(settings);
                     if (footerGcode) {
                         await sendKlipperGcodeScript(printer, footerGcode);
                     }
-                    
+
                     // Trigger actual Moonraker print job
                     const url = `http://${host}/printer/print/start?filename=${encodeURIComponent(fileOrFilename)}`;
                     const res = await fetch(url, {
@@ -6876,38 +7812,38 @@ function setupPreviewFooter(printerId, fileOrFilename, isLocal) {
 function uploadGcodeToMoonraker(printerId, file, startPrintImmediately = false, settings = null) {
     const printer = printersState.find(p => p.id === printerId);
     if (!printer) return;
-    
+
     printer.uploading = true;
     printer.uploadProgress = 0;
     savePrinters();
     renderPrinters();
-    
+
     let address = printer.address;
     let host = address;
     if (!host.includes(':') && !address.toLowerCase().startsWith('com') && !address.toLowerCase().startsWith('/dev/')) {
         host = `${address}:7125`;
     }
-    
+
     const url = `http://${host}/server/files/upload`;
     const xhr = new XMLHttpRequest();
-    
+
     xhr.upload.addEventListener('progress', (e) => {
         if (e.lengthComputable) {
             const pct = Math.round((e.loaded / e.total) * 100);
             printer.uploadProgress = pct;
-            
+
             const progressEl = document.getElementById(`upload-pct-${printerId}`);
             const fillEl = document.getElementById(`upload-fill-${printerId}`);
             if (progressEl) progressEl.innerText = `%${pct}`;
             if (fillEl) fillEl.style.width = `${pct}%`;
         }
     });
-    
+
     xhr.addEventListener('load', () => {
         printer.uploading = false;
         savePrinters();
         renderPrinters();
-        
+
         if (xhr.status >= 200 && xhr.status < 300) {
             addNotification('success', currentLang === 'tr' ? 'Yükleme Başarılı' : 'Upload Successful', `${file.name} başarıyla ${printer.name} yazıcısına yüklendi.`);
         } else {
@@ -6915,14 +7851,14 @@ function uploadGcodeToMoonraker(printerId, file, startPrintImmediately = false, 
             addNotification('error', currentLang === 'tr' ? 'Yükleme Başarısız' : 'Upload Failed', `${printer.name}: ${xhr.statusText || 'Hata'}`);
         }
     });
-    
+
     xhr.addEventListener('error', () => {
         printer.uploading = false;
         savePrinters();
         renderPrinters();
         addNotification('error', currentLang === 'tr' ? 'Yükleme Başarısız' : 'Upload Failed', `${printer.name}: Bağlantı Hatası`);
     });
-    
+
     const formData = new FormData();
     if (settings) {
         const header = generateInjectedGcodeHeader(settings);
@@ -6932,11 +7868,11 @@ function uploadGcodeToMoonraker(printerId, file, startPrintImmediately = false, 
     } else {
         formData.append('file', file, file.name);
     }
-    
+
     if (startPrintImmediately) {
         formData.append('print', 'true');
     }
-    
+
     xhr.open('POST', url);
     xhr.send(formData);
 }
@@ -6944,26 +7880,26 @@ function uploadGcodeToMoonraker(printerId, file, startPrintImmediately = false, 
 function simulateUpload(printerId, file, startPrintImmediately = false, settings = null) {
     const printer = printersState.find(p => p.id === printerId);
     if (!printer) return;
-    
+
     printer.uploading = true;
     printer.uploadProgress = 0;
     savePrinters();
     renderPrinters();
-    
+
     let progress = 0;
     const interval = setInterval(() => {
         progress += 10;
         printer.uploadProgress = progress;
-        
+
         const progressEl = document.getElementById(`upload-pct-${printerId}`);
         const fillEl = document.getElementById(`upload-fill-${printerId}`);
         if (progressEl) progressEl.innerText = `%${progress}`;
         if (fillEl) fillEl.style.width = `${progress}%`;
-        
+
         if (progress >= 100) {
             clearInterval(interval);
             printer.uploading = false;
-            
+
             if (startPrintImmediately) {
                 printer.status = 'printing';
                 printer.progress = 0;
@@ -6974,7 +7910,7 @@ function simulateUpload(printerId, file, startPrintImmediately = false, settings
                 printer.targetT0Temp = 220;
                 printer.targetBedTemp = 60;
             }
-            
+
             savePrinters();
             renderPrinters();
             addNotification('success', currentLang === 'tr' ? 'Yükleme Başarılı' : 'Upload Successful', `${file.name} başarıyla ${printer.name} (Simüle) yazıcısına yüklendi.`);
@@ -6985,50 +7921,50 @@ function simulateUpload(printerId, file, startPrintImmediately = false, settings
 function initGcodeDragAndDrop() {
     const grid = document.getElementById('printers-grid');
     if (!grid) return;
-    
+
     const dragCounters = {};
-    
+
     grid.addEventListener('dragenter', (e) => {
         const card = e.target.closest('.printer-card');
         if (!card) return;
-        
+
         const printerId = card.getAttribute('data-id');
         if (!printerId) return;
-        
+
         e.preventDefault();
         dragCounters[printerId] = (dragCounters[printerId] || 0) + 1;
         card.classList.add('drag-over');
     });
-    
+
     grid.addEventListener('dragover', (e) => {
         e.preventDefault();
     });
-    
+
     grid.addEventListener('dragleave', (e) => {
         const card = e.target.closest('.printer-card');
         if (!card) return;
-        
+
         const printerId = card.getAttribute('data-id');
         if (!printerId) return;
-        
+
         dragCounters[printerId] = (dragCounters[printerId] || 1) - 1;
         if (dragCounters[printerId] <= 0) {
             card.classList.remove('drag-over');
             dragCounters[printerId] = 0;
         }
     });
-    
+
     grid.addEventListener('drop', (e) => {
         const card = e.target.closest('.printer-card');
         if (!card) return;
-        
+
         const printerId = card.getAttribute('data-id');
         if (!printerId) return;
-        
+
         e.preventDefault();
         dragCounters[printerId] = 0;
         card.classList.remove('drag-over');
-        
+
         const files = e.dataTransfer.files;
         if (files && files.length > 0) {
             const file = files[0];
