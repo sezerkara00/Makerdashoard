@@ -280,9 +280,100 @@ function runUntruncatedErrorsMigration() {
     }
 }
 
+/**
+ * Migration to clear out legacy runs for printer logs to trigger clean re-fetch and parsing
+ * in the new C2P Print Event format.
+ */
+function runC2pParserMigration() {
+    try {
+        const userDataPath = getUserDataPath();
+        const printersPath = path.join(userDataPath, 'printers.json');
+        if (!fs.existsSync(printersPath)) return;
+
+        const printers = JSON.parse(fs.readFileSync(printersPath, 'utf8'));
+        printers.forEach(printer => {
+            const db = getPrinterDb(printer.id);
+            const done = db.get('c2p_migration_v2').value();
+            if (done) return;
+
+            // 1. Remove all runs starting with 'klippy.log'
+            const runs = db.get('analysis_runs').value() || [];
+            const newRuns = runs.filter(r => !r.fileName.startsWith('klippy.log'));
+            db.set('analysis_runs', newRuns).write();
+
+            // 2. Reset analysis_state.json for this printer to clear cache sizes
+            if (printer.logFolderPath && printer.name) {
+                const safeName = printer.name.replace(/[^a-z0-9_\-\s]/gi, '_').trim();
+                const folder = path.join(printer.logFolderPath, safeName);
+                const statePath = path.join(folder, 'analysis_state.json');
+                if (fs.existsSync(statePath)) {
+                    try {
+                        const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+                        if (state.files) {
+                            Object.keys(state.files).forEach(k => {
+                                if (k.startsWith('klippy.log')) {
+                                    delete state.files[k];
+                                }
+                            });
+                        }
+                        if (state.parserStates) {
+                            Object.keys(state.parserStates).forEach(k => {
+                                if (k.startsWith('klippy.log')) {
+                                    delete state.parserStates[k];
+                                }
+                            });
+                        }
+                        if (state.rolloverDates) {
+                            Object.keys(state.rolloverDates).forEach(k => {
+                                if (k.startsWith('klippy.log')) {
+                                    delete state.rolloverDates[k];
+                                }
+                            });
+                        }
+                        fs.writeFileSync(statePath, JSON.stringify(state, null, 2), 'utf8');
+                    } catch (e) {
+                        try {
+                            fs.unlinkSync(statePath);
+                        } catch (err) {}
+                    }
+                }
+            }
+
+            db.set('c2p_migration_v2', true).write();
+            console.log(`[Migration] Cleaned up old runs for C2P log transition v2: ${printer.name}`);
+        });
+    } catch (err) {
+        console.error('[Migration] Error running C2P parser migration:', err.message);
+    }
+}
+
+/**
+ * Migration to completely remove printer_logs.txt runs from all printer databases.
+ */
+function removePrinterLogsMigration() {
+    try {
+        const userDataPath = getUserDataPath();
+        const printersPath = path.join(userDataPath, 'printers.json');
+        if (!fs.existsSync(printersPath)) return;
+
+        const printers = JSON.parse(fs.readFileSync(printersPath, 'utf8'));
+        printers.forEach(printer => {
+            const db = getPrinterDb(printer.id);
+            const runs = db.get('analysis_runs').value() || [];
+            const filteredRuns = runs.filter(r => r.fileName !== 'printer_logs.txt');
+            db.set('analysis_runs', filteredRuns).write();
+            console.log(`[Migration] Removed printer_logs.txt from DB for printer: ${printer.name}`);
+        });
+    } catch (err) {
+        console.error('[Migration] Error removing printer_logs.txt from DB:', err.message);
+    }
+}
+
 module.exports = {
     getPrinterDb,
     getDb,
     migrateLegacyDb,
-    runUntruncatedErrorsMigration
+    runUntruncatedErrorsMigration,
+    runC2pParserMigration,
+    removePrinterLogsMigration
 };

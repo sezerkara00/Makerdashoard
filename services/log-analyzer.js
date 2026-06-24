@@ -100,34 +100,34 @@ function collectTemperaturePeaks(pText, logLines, targetSensors = KLIPPY_TARGET_
     return peaks;
 }
 
-function isKlippyStartMarker(line, lineLower) {
-    // Must be a real command dispatch, not a macro definition or config reference.
-    // Reject lines that are clearly config/debug output:
-    // - SET_GCODE_VARIABLE ... (macro variable assignments)
-    // - gcode_macro START_PRINT (config section header)
-    // - printer["gcode_macro START_PRINT"] (Jinja template references)
-    // - Lines that are inside the config dump (no Stats lines seen yet → handled by statsStarted guard)
-    if (lineLower.includes('set_gcode_variable') && lineLower.includes('start_print')) return false;
-    if (lineLower.includes('gcode_macro start_print')) return false;
-    if (lineLower.includes('printer[') && lineLower.includes('start_print')) return false;
-    if (lineLower.includes('m118') && lineLower.includes('start_print')) return false;
+// function isKlippyStartMarker(line, lineLower) {
+//     // Must be a real command dispatch, not a macro definition or config reference.
+//     // Reject lines that are clearly config/debug output:
+//     // - SET_GCODE_VARIABLE ... (macro variable assignments)
+//     // - gcode_macro START_PRINT (config section header)
+//     // - printer["gcode_macro START_PRINT"] (Jinja template references)
+//     // - Lines that are inside the config dump (no Stats lines seen yet → handled by statsStarted guard)
+//     if (lineLower.includes('set_gcode_variable') && lineLower.includes('start_print')) return false;
+//     if (lineLower.includes('gcode_macro start_print')) return false;
+//     if (lineLower.includes('printer[') && lineLower.includes('start_print')) return false;
+//     if (lineLower.includes('m118') && lineLower.includes('start_print')) return false;
 
-    // Real start signals
-    return line.includes('START_PRINT') && !lineLower.includes('variable_')
-        || line.includes('START PRINT')
-        || lineLower.includes('starting sd card print')
-        || line.includes('Sending: START_PRINT');
-}
+//     // Real start signals
+//     return line.includes('START_PRINT') && !lineLower.includes('variable_')
+//         || line.includes('START PRINT')
+//         || lineLower.includes('starting sd card print')
+//         || line.includes('Sending: START_PRINT');
+// }
 
-function isKlippyEndMarker(line, lineLower) {
-    return line.includes('Finished SD card print')
-        || line.includes('Exiting SD card print')
-        || line.includes('is_print_stats:complete')
-        || line.includes('END_PRINT') || line.includes('END PRINT')
-        || line.includes('CANCEL_PRINT') || line.includes('CANCEL PRINT')
-        || line.includes('is_print_stats:cancelled')
-        || /\bM315\b/.test(line);
-}
+// function isKlippyEndMarker(line, lineLower) {
+//     return line.includes('Finished SD card print')
+//         || line.includes('Exiting SD card print')
+//         || line.includes('is_print_stats:complete')
+//         || line.includes('END_PRINT') || line.includes('END PRINT')
+//         || line.includes('CANCEL_PRINT') || line.includes('CANCEL PRINT')
+//         || line.includes('is_print_stats:cancelled')
+//         || /\bM315\b/.test(line);
+// }
 
 function klippyAnalysisHasActivity(result) {
     return result.errorCount > 0
@@ -137,57 +137,454 @@ function klippyAnalysisHasActivity(result) {
         || result.reportContent.includes('❌ Baskı');
 }
 
+function formatIsoToTrDate(isoStr) {
+    if (!isoStr) return '';
+    try {
+        const d = new Date(isoStr);
+        if (isNaN(d.getTime())) return isoStr;
+        const pad = (n) => String(n).padStart(2, '0');
+        const day = pad(d.getDate());
+        const month = pad(d.getMonth() + 1);
+        const year = d.getFullYear();
+        const hours = pad(d.getHours());
+        const minutes = pad(d.getMinutes());
+        const seconds = pad(d.getSeconds());
+        return `${day}.${month}.${year} ${hours}:${minutes}:${seconds}`;
+    } catch (e) {
+        return isoStr;
+    }
+}
+
+function parseC2pEventLine(line) {
+    const idx = line.indexOf('C2P_PRINT_EVENT|');
+    if (idx === -1) return null;
+    const parts = line.substring(idx).split('|');
+    const eventObj = {};
+    for (const part of parts) {
+        if (part === 'C2P_PRINT_EVENT') continue;
+        const eqIdx = part.indexOf('=');
+        if (eqIdx === -1) continue;
+        const key = part.substring(0, eqIdx).trim();
+        let val = part.substring(eqIdx + 1).trim();
+
+        if (val === 'null') {
+            eventObj[key] = null;
+        } else if (val.startsWith('"') && val.endsWith('"')) {
+            eventObj[key] = val.substring(1, val.length - 1);
+        } else {
+            const num = Number(val);
+            eventObj[key] = isNaN(num) ? val : num;
+        }
+    }
+    return eventObj;
+}
+
 /**
  * Runs the exact Klipper log parsing algorithm translated from Python
  */
 function parseKlippyLogContent(logContent, printerId = "edist_toolchanger_01", passedStartDt = null, initialState = null) {
     const logLines = logContent.split('\n');
 
-    // Find rollover date and correct for Klipper uptime offset.
-    //
-    // Klipper logs do NOT contain real wall-clock timestamps. Every "Stats X:" line
-    // records X = seconds elapsed since the Klipper daemon started.
-    // The "Log rollover at <date>" line tells us when the log FILE was rotated
-    // (typically at midnight), NOT when Klipper started.
-    //
-    // Problem: if Klipper started at 16:15 on Jun 17 and the log rotated at
-    //          00:00 on Jun 18, the first Stats line after rollover will say
-    //          ~27882 (7h 44m 42s). Using rolloverDate + 27882s gives 07:44:42
-    //          which is WRONG — the event actually happened at ~00:00:00 on Jun 18.
-    //
-    // Fix: startDt = rolloverDate - firstStatsSec
-    //      This gives the real Klipper start time.
-    //      Then: eventTime = startDt + currentStatsSec  ← always correct.
-    let startDt = passedStartDt;
-    if (!startDt) {
-        let rolloverDate = null;
-        let firstStatsSec = null;
+    const hasC2pEvents = logLines.some(line => line.includes('C2P_PRINT_EVENT|'));
 
-        for (const line of logLines) {
-            if (!rolloverDate && line.includes('Log rollover at')) {
-                try {
-                    const dateStr = line.split('Log rollover at').pop().split('=')[0].trim();
-                    rolloverDate = parseRolloverDate(dateStr);
-                } catch (e) { /* ignore */ }
+    if (hasC2pEvents) {
+        // --- NEW C2P PARSER BLOCK ---
+        const sessionsMap = {};
+        const printStats = { Success: 0, Cancelled: 0, Errors: 0 };
+        const uniqueErrorsMap = {};
+        const baskiRaporuLines = [];
+        const outgoingEvents = [];
+        let activeJobId = null;
+
+        // Still parse rollover date to keep standard uptime log line timestamp calculations working
+        let startDt = passedStartDt;
+        if (!startDt) {
+            let rolloverDate = null;
+            let firstStatsSec = null;
+            for (const line of logLines) {
+                if (!rolloverDate && line.includes('Log rollover at')) {
+                    try {
+                        const dateStr = line.split('Log rollover at').pop().split('=')[0].trim();
+                        rolloverDate = parseRolloverDate(dateStr);
+                    } catch (e) { }
+                }
+                if (rolloverDate && firstStatsSec === null) {
+                    const statsMatch = line.match(/^Stats\s+([\d.]+):/i);
+                    if (statsMatch) firstStatsSec = parseFloat(statsMatch[1]);
+                }
+                if (rolloverDate && firstStatsSec !== null) break;
             }
-            // After we have the rollover date, grab the first Stats line to get
-            // the uptime-seconds value at the moment of rollover.
-            if (rolloverDate && firstStatsSec === null) {
-                const statsMatch = line.match(/^Stats\s+([\d.]+):/i);
-                if (statsMatch) {
-                    firstStatsSec = parseFloat(statsMatch[1]);
+            if (rolloverDate && firstStatsSec !== null) {
+                startDt = new Date(rolloverDate.getTime() - firstStatsSec * 1000);
+            } else if (rolloverDate) {
+                startDt = rolloverDate;
+            }
+        }
+        if (!startDt) startDt = new Date();
+
+        // Process line by line
+        for (let idx = 0; idx < logLines.length; idx++) {
+            const line = logLines[idx].trim();
+            if (!line) continue;
+
+            if (line.includes('C2P_PRINT_EVENT|')) {
+                const evt = parseC2pEventLine(line);
+                if (!evt) continue;
+
+                const { event, job_id, file, path, pos, size, progress, line: lineNum, tool, z, duration_s, started_ts, ts, resume, error } = evt;
+
+                const trTs = formatIsoToTrDate(ts);
+                const trStartedTs = formatIsoToTrDate(started_ts || ts);
+
+                if (event === 'START') {
+                    sessionsMap[job_id] = {
+                        jobId: job_id,
+                        file: file || 'Bilinmeyen dosya',
+                        path: path || null,
+                        status: 'printing',
+                        startTime: trStartedTs,
+                        endTime: null,
+                        lastProgress: Math.round((progress || 0) * 100),
+                        duration: null,
+                        printTime: 0,
+                        totalTime: 0,
+                        tool: tool,
+                        z: z,
+                        resume: resume ?? 0,
+                        error: null,
+                        peaks: {},
+                        events: []
+                    };
+
+                    activeJobId = job_id;
+
+                    const resumeText = resume === 1 ? ' [DEVAM]' : '';
+                    const fileLabel = file ? ` (${file})` : '';
+                    const reportLine = `🚀 Baskı Başladı${fileLabel}${resumeText} : ${trTs}`;
+                    baskiRaporuLines.push(reportLine);
+                    sessionsMap[job_id].events.push({ type: 'start', text: reportLine });
+
+                    outgoingEvents.push({
+                        eventType: "PRINT_START",
+                        payload: {
+                            printer_id: printerId,
+                            event: "PRINT_START",
+                            timestamp: trStartedTs,
+                            data: { print_id: job_id, status: "Printing" }
+                        }
+                    });
+                } else if (event === 'COMPLETE' || event === 'CANCEL' || event === 'ERROR' || event === 'SHUTDOWN') {
+                    if (!sessionsMap[job_id]) {
+                        sessionsMap[job_id] = {
+                            jobId: job_id,
+                            file: file || 'Bilinmeyen dosya',
+                            path: path || null,
+                            status: 'printing',
+                            startTime: trStartedTs,
+                            endTime: null,
+                            lastProgress: 0,
+                            duration: null,
+                            printTime: 0,
+                            totalTime: 0,
+                            tool: tool,
+                            z: z,
+                            resume: resume ?? 0,
+                            error: null,
+                            peaks: {},
+                            events: []
+                        };
+                    }
+
+                    const session = sessionsMap[job_id];
+                    session.endTime = trTs;
+                    session.lastProgress = Math.round((progress || 0) * 100);
+                    if (tool !== null && tool !== undefined) session.tool = tool;
+                    if (z !== null && z !== undefined) session.z = z;
+                    if (duration_s !== null && duration_s !== undefined) {
+                        session.totalTime = Math.round(duration_s);
+                        session.printTime = Math.round(duration_s);
+                        session.duration = `${Math.max(0, Math.round(duration_s / 60))} dk`;
+                    }
+
+                    if (job_id === activeJobId) {
+                        activeJobId = null;
+                    }
+
+                    let eventType = 'info';
+                    let reportLine = '';
+                    let cancelReason = "N/A";
+
+                    if (event === 'COMPLETE') {
+                        session.status = 'completed';
+                        printStats.Success++;
+                        eventType = 'success';
+                        reportLine = `✅ Baskı Bitti (${file})${session.duration ? ` - Süre: ${session.duration}` : ''} : ${trTs}`;
+
+                        outgoingEvents.push({
+                            eventType: "PRINT_END",
+                            payload: {
+                                printer_id: printerId,
+                                event: "PRINT_END",
+                                timestamp: trTs,
+                                data: {
+                                    print_id: job_id,
+                                    status: "Success",
+                                    start_time: session.startTime,
+                                    end_time: trTs,
+                                    cancel_reason: "N/A",
+                                    temperature_peaks: {}
+                                }
+                            }
+                        });
+                    } else if (event === 'CANCEL') {
+                        session.status = 'cancelled';
+                        printStats.Cancelled++;
+                        eventType = 'cancel';
+                        reportLine = `❌ Baskı İptal Edildi (${file})${session.duration ? ` - Süre: ${session.duration}` : ''} : ${trTs}`;
+                        cancelReason = "Kullanıcı Manuel İptal Etti";
+
+                        outgoingEvents.push({
+                            eventType: "PRINT_END",
+                            payload: {
+                                printer_id: printerId,
+                                event: "PRINT_END",
+                                timestamp: trTs,
+                                data: {
+                                    print_id: job_id,
+                                    status: "Cancelled",
+                                    start_time: session.startTime,
+                                    end_time: trTs,
+                                    cancel_reason: cancelReason,
+                                    temperature_peaks: {}
+                                }
+                            }
+                        });
+                    } else if (event === 'ERROR' || event === 'SHUTDOWN') {
+                        session.status = 'failed';
+                        printStats.Errors++;
+                        eventType = 'error';
+                        const errText = error || (event === 'SHUTDOWN' ? 'Klippy shutdown during print' : 'Bilinmeyen Hata');
+                        session.error = errText;
+
+                        if (event === 'SHUTDOWN') {
+                            reportLine = `❌ Sistem Hatası (Kapanma: ${errText}) : ${trTs}`;
+                        } else {
+                            reportLine = `❌ Baskı İptal (Hata: ${errText}) : ${trTs}`;
+                        }
+
+                        const errorKey = `${event}_${trTs}_${job_id}`;
+                        uniqueErrorsMap[errorKey] = {
+                            time: trTs,
+                            type: event === 'SHUTDOWN' ? 'SHUTDOWN_ERR' : 'PRINT_ERR',
+                            code: event === 'SHUTDOWN' ? 'SHUTDOWN_ERR' : 'PRINT_ERR',
+                            title: event === 'SHUTDOWN' ? 'Klipper Shutdown Hatası' : 'Baskı Hatası',
+                            desc: errText,
+                            duration: session.duration || '-',
+                            context: `Job ID: ${job_id}\nFile: ${file}\nPosition: ${pos}/${size}\nLine: ${lineNum}`,
+                            recentGcodes: []
+                        };
+
+                        outgoingEvents.push({
+                            eventType: "ERROR_REPORT",
+                            payload: {
+                                printer_id: printerId,
+                                event: "ERROR_REPORT",
+                                timestamp: trTs,
+                                data: {
+                                    print_id: job_id,
+                                    error_code: event === 'SHUTDOWN' ? "SHUTDOWN_ERR" : "PRINT_ERR",
+                                    error_summary: event === 'SHUTDOWN' ? "Klipper Shutdown Hatası" : "Baskı Hatası",
+                                    error_description: errText,
+                                    status: "Shutdown"
+                                }
+                            }
+                        });
+
+                        outgoingEvents.push({
+                            eventType: "PRINT_END",
+                            payload: {
+                                printer_id: printerId,
+                                event: "PRINT_END",
+                                timestamp: trTs,
+                                data: {
+                                    print_id: job_id,
+                                    status: event === 'SHUTDOWN' ? "Failed / Printer Shutdown" : "Failed",
+                                    start_time: session.startTime,
+                                    end_time: trTs,
+                                    cancel_reason: errText,
+                                    temperature_peaks: {}
+                                }
+                            }
+                        });
+                    }
+
+                    baskiRaporuLines.push(reportLine);
+                    session.events.push({ type: eventType, text: reportLine });
+                }
+            } else if (activeJobId && line.toLowerCase().includes('stats ')) {
+                // Collect temperatures for active job
+                for (const sensor of KLIPPY_TARGET_SENSORS) {
+                    if (line.includes(sensor)) {
+                        const r1 = new RegExp(sensor + ':\\s+[^:\\n]*temp=([\\d.-]+)');
+                        const r2 = new RegExp(sensor + ':\\s+target=[\\d.]+\\s+temp=([\\d.-]+)');
+                        let val = null;
+                        const match1 = r1.exec(line);
+                        if (match1) {
+                            val = parseFloat(match1[1]);
+                        } else {
+                            const match2 = r2.exec(line);
+                            if (match2) val = parseFloat(match2[1]);
+                        }
+                        if (val !== null && !isNaN(val)) {
+                            const session = sessionsMap[activeJobId];
+                            if (!session.peaks) session.peaks = {};
+                            session.peaks[sensor] = Math.max(session.peaks[sensor] || 0, val);
+                        }
+                    }
                 }
             }
-            if (rolloverDate && firstStatsSec !== null) break;
         }
 
-        if (rolloverDate && firstStatsSec !== null) {
-            // Real Klipper start = rollover moment − uptime at rollover
-            startDt = new Date(rolloverDate.getTime() - firstStatsSec * 1000);
-        } else if (rolloverDate) {
-            startDt = rolloverDate;
+        // Format peaks and build global max temperatures
+        const globalPeaks = {};
+        const printSessionsList = Object.values(sessionsMap).reverse();
+
+        printSessionsList.forEach(session => {
+            if (session.peaks) {
+                const peakStrList = [];
+                Object.entries(session.peaks).forEach(([sensor, temp]) => {
+                    peakStrList.push(`${sensor}: ${temp.toFixed(1)}°C`);
+                    globalPeaks[sensor] = Math.max(globalPeaks[sensor] || 0, temp);
+                });
+                if (peakStrList.length > 0) {
+                    session.peaksText = peakStrList.join(', ');
+                }
+            }
+        });
+
+        // Update outgoing print end events with temperature peaks
+        outgoingEvents.forEach(evt => {
+            if (evt.eventType === "PRINT_END") {
+                const jobId = evt.payload.data.print_id;
+                const session = sessionsMap[jobId];
+                if (session && session.peaks) {
+                    evt.payload.data.temperature_peaks = session.peaks;
+                }
+            }
+        });
+
+        // Remove temporary peaks object from final sessions list
+        printSessionsList.forEach(session => {
+            delete session.peaks;
+        });
+
+        const maxTempsList = Object.entries(globalPeaks).map(([sensor, temp]) => ({
+            sensor,
+            value: `${temp.toFixed(1)} °C`
+        }));
+
+        // Generate formatted report content for raw tab
+        let report = "";
+        if (outgoingEvents.length > 0) {
+            outgoingEvents.forEach(evt => {
+                report += `\n📡 [SERVER LOG] OUTGOING EVENT: ${evt.eventType}\n`;
+                report += `------------------------------------------------------------\n`;
+                report += JSON.stringify(evt.payload, null, 2) + `\n`;
+                report += `------------------------------------------------------------\n`;
+            });
         }
+
+        report += `\n============================================================\n`;
+        report += `=== MAKERDASHBOARD GERÇEK BASKI RAPORU ===\n`;
+        report += `Log Başlangıcı: -\n`;
+        if (baskiRaporuLines.length > 0) {
+            baskiRaporuLines.slice().reverse().forEach(line => {
+                report += line + '\n';
+            });
+        } else {
+            report += `Log periyodunda gerçek zamanlı bir baskı hareketi gerçekleşmedi.\n`;
+        }
+        report += `============================================================\n`;
+
+        report += `\n=== BASKI ESNASINDA ÖLÇÜLEN MAKSIMUM GERÇEK SICAKLIKLAR ===\n`;
+        Object.entries(globalPeaks).sort().forEach(([s, maxTemp]) => {
+            report += `${s}: ${maxTemp.toFixed(1)} °C\n`;
+        });
+        report += `============================================================\n`;
+
+        report += `\n===================================================================================================================\n`;
+        report += `              📊 MAKERDASHBOARD GERÇEK ZAMANLI SENKRONİZE MAP TABLOSU               \n`;
+        report += `===================================================================================================================\n`;
+        report += `\n[GENEL ÖZET] Gerçek Başarılı: ${printStats.Success} | Gerçek İptal: ${printStats.Cancelled} | Yakalanan Hatalar: ${printStats.Errors}\n`;
+        report += `\n[YAKALANAN TÜM KRİTİK HATALARIN LİSTESİ]\n`;
+
+        const detectedErrorsList = Object.values(uniqueErrorsMap);
+        if (detectedErrorsList.length > 0) {
+            report += `+----------+---------------+---------------------------+--------------------------------------------------------+\n`;
+            report += `| Saat     | Hata Kodu     | Hata Başlığı              | Ayıklanan Açıklama                                     |\n`;
+            report += `+----------+---------------+---------------------------+--------------------------------------------------------+\n`;
+            detectedErrorsList.forEach(err => {
+                const shortDesc = (err.desc || '').length <= 52 ? (err.desc || '') : (err.desc || '').substring(0, 50) + "...";
+                const paddedTime = String(err.time || '').padEnd(8);
+                const paddedType = String(err.type || err.code || '').padEnd(13);
+                const paddedTitle = String(err.title || '').padEnd(25);
+                const paddedDesc = shortDesc.padEnd(54);
+                report += `| ${paddedTime} | ${paddedType} | ${paddedTitle} | ${paddedDesc} |\n`;
+            });
+            report += `+----------+---------------+---------------------------+--------------------------------------------------------+\n`;
+        } else {
+            report += `+-----------------------------------------------------------------------------------------------------------------------+\n`;
+            report += `| Şu an aktif log dosyasında eşleşen dinamik bir hata kaydı bulunmuyor.                                                 |\n`;
+            report += `+-----------------------------------------------------------------------------------------------------------------------+\n`;
+        }
+        report += `===================================================================================================================\n`;
+
+        const sections = {
+            serverLogs: outgoingEvents.map(evt => ({
+                type: evt.eventType,
+                payload: evt.payload
+            })),
+            baskiRaporu: baskiRaporuLines.map(line => {
+                let type = 'info';
+                if (line.includes('🚀')) type = 'start';
+                else if (line.includes('✅')) type = 'success';
+                else if (line.includes('❌')) {
+                    if (line.includes('Hata') || line.includes('Sistem Hatası')) type = 'error';
+                    else type = 'cancel';
+                }
+                return { type, text: line };
+            }),
+            maxTemps: maxTempsList,
+            summary: {
+                success: printStats.Success,
+                cancelled: printStats.Cancelled,
+                paused: 0,
+                errors: printStats.Errors
+            },
+            errors: detectedErrorsList,
+            printSessions: printSessionsList
+        };
+
+        return {
+            printStats,
+            errorCount: printStats.Errors,
+            reportContent: report,
+            errors: detectedErrorsList,
+            sections,
+            parserState: {
+                running: activeJobId !== null,
+                pText: '',
+                statsStarted: true,
+                currentStartTimestamp: '',
+                currentStartSec: 0,
+                currentPrintId: activeJobId || '',
+                lastOpenedFilename: '',
+                lastStatsSec: 0,
+                lastPrintStatsState: ''
+            }
+        };
     }
+
 
     if (!startDt) {
         startDt = new Date();
@@ -516,10 +913,10 @@ function parseKlippyLogContent(logContent, printerId = "edist_toolchanger_01", p
             continue;
         }
 
-        if (statsStarted && isKlippyStartMarker(lineStrip, lineLower) && !running) {
-            beginPrintSession(idx, exactTimestamp);
-            continue;
-        }
+        // if (statsStarted && isKlippyStartMarker(lineStrip, lineLower) && !running) {
+        //     beginPrintSession(idx, exactTimestamp);
+        //     continue;
+        // }
 
         if (lineLower.includes('print_stats:')) {
             const fnMatch = line.match(/filename=([^\s,]+)/i);
@@ -551,10 +948,10 @@ function parseKlippyLogContent(logContent, printerId = "edist_toolchanger_01", p
         // ========================================================
         // ✅ SENARYO C: BASKI BİTİŞİ VEYA KULLANICI İPTALİ
         // ========================================================
-        if ((running || statsStarted) && isKlippyEndMarker(lineStrip, lineLower)) {
-            const status = (line.includes('CANCEL') || line.includes('Cancel') || /\bM315\b/.test(lineStrip)) ? 'Cancelled' : 'Success';
-            finalizePrintSession(status, exactTimestamp);
-        }
+        // if ((running || statsStarted) && isKlippyEndMarker(lineStrip, lineLower)) {
+        //     const status = (line.includes('CANCEL') || line.includes('Cancel') || /\bM315\b/.test(lineStrip)) ? 'Cancelled' : 'Success';
+        //     finalizePrintSession(status, exactTimestamp);
+        // }
     }
 
     const detectedErrorsList = Object.values(uniqueErrorsMap);
@@ -690,7 +1087,7 @@ function parseKlippyLogContent(logContent, printerId = "edist_toolchanger_01", p
  */
 function saveRunToDatabase(printerId, fileName, fileSize, analysisResult, incremental = false, skipStatsUpdate = false) {
     const db = getPrinterDb(printerId);
-    const parsedSections = extractRunSections(analysisResult.reportContent);
+    const parsedSections = analysisResult.sections || extractRunSections(analysisResult.reportContent);
     const rawErrors = analysisResult.errors || parsedSections.errors || [];
 
     if (incremental) {
@@ -737,8 +1134,21 @@ function saveRunToDatabase(printerId, fileName, fileSize, analysisResult, increm
                 }
             });
 
-            // Recalculate printSessions for incremental merge
-            existingRun.printSessions = buildPrintSessionsFromEvents(existingRun.baskiRaporu, existingRun.maxTemps);
+            if (analysisResult.sections) {
+                // Merging C2P structured print sessions using jobId
+                if (!existingRun.printSessions) existingRun.printSessions = [];
+                parsedSections.printSessions.forEach(sess => {
+                    const existingSessIdx = existingRun.printSessions.findIndex(s => s.jobId === sess.jobId);
+                    if (existingSessIdx !== -1) {
+                        existingRun.printSessions[existingSessIdx] = Object.assign(existingRun.printSessions[existingSessIdx], sess);
+                    } else {
+                        existingRun.printSessions.push(sess);
+                    }
+                });
+            } else {
+                // Recalculate printSessions for incremental merge (legacy fallback)
+                existingRun.printSessions = buildPrintSessionsFromEvents(existingRun.baskiRaporu, existingRun.maxTemps);
+            }
 
             existingRun.lastSyncTime = new Date().toLocaleString('tr-TR');
             existingRun.fileSize = fileSize;
@@ -1602,6 +2012,45 @@ function buildPrintSessionsFromEvents(baskiRaporu, runMaxTemps) {
             continue;
         }
 
+        if (item.type === 'error' || /Baskı İptal \(Hata/i.test(text) || /Sistem Hatası/i.test(text) || /Hata/i.test(text)) {
+            if (!current) startSession(file, time, item);
+            current.status = 'failed';
+            current.endTime = time;
+            current.events.push(item);
+
+            const peaksMatch = text.match(/Peak Sıcaklıklar:\s*\[(.*?)\]/i);
+            if (peaksMatch) {
+                current.peaksText = peaksMatch[1].trim();
+            }
+            const durationMatch = text.match(/Süre:\s*(\d+)\s*dk/i);
+            if (durationMatch) {
+                current.duration = `${durationMatch[1]} dk`;
+            }
+
+            let printTime = 0;
+            let totalTime = 0;
+
+            const printTimeMatch = text.match(/PrintTime:\s*([\d.]+)\s*dk(?:\s*\(([\d.]+)\s*sn\))?/i);
+            if (printTimeMatch) {
+                printTime = printTimeMatch[2] ? parseFloat(printTimeMatch[2]) : parseFloat(printTimeMatch[1]) * 60;
+            }
+            const totalTimeMatch = text.match(/TotalTime:\s*([\d.]+)\s*dk(?:\s*\(([\d.]+)\s*sn\))?/i);
+            if (totalTimeMatch) {
+                totalTime = totalTimeMatch[2] ? parseFloat(totalTimeMatch[2]) : parseFloat(totalTimeMatch[1]) * 60;
+            } else if (durationMatch) {
+                totalTime = parseInt(durationMatch[1], 10) * 60;
+            }
+            if (!printTime && totalTime) {
+                printTime = totalTime;
+            }
+
+            current.printTime = printTime;
+            current.totalTime = totalTime;
+
+            closeSession();
+            continue;
+        }
+
         if (item.type === 'progress' || text.includes('[PROGRESS]') || text.includes('Yazdırılıyor:')) {
             const progMatch = text.match(/%(\d+)/);
             const newProg = progMatch ? parseInt(progMatch[1], 10) : null;
@@ -1803,6 +2252,11 @@ function updateTotalPrintDuration(printerId) {
                 activeOpenSession.endTime = sess.endTime;
                 activeOpenSession.peaksText = sess.peaksText || activeOpenSession.peaksText;
                 activeOpenSession.events = activeOpenSession.events.concat(sess.events);
+                if (sess.jobId) activeOpenSession.jobId = sess.jobId;
+                if (sess.z !== undefined && sess.z !== null) activeOpenSession.z = sess.z;
+                if (sess.tool !== undefined && sess.tool !== null) activeOpenSession.tool = sess.tool;
+                if (sess.resume !== undefined && sess.resume !== null) activeOpenSession.resume = sess.resume;
+                if (sess.error) activeOpenSession.error = sess.error;
 
                 const startD_active = parseTrLogDate(activeOpenSession.startTime);
                 const endD_active = parseTrLogDate(activeOpenSession.endTime);
@@ -1885,7 +2339,7 @@ function updateTotalPrintDuration(printerId) {
         }
     }
     if (activeOpenSession) {
-        if (activeOpenSession.fileName && activeOpenSession.fileName !== 'klippy.log' && activeOpenSession.fileName !== 'printer_logs.txt') {
+        if (activeOpenSession.fileName && activeOpenSession.fileName !== 'klippy.log') {
             activeOpenSession.status = 'cancelled';
             let lastEventTime = activeOpenSession.startTime;
             if (activeOpenSession.events && activeOpenSession.events.length > 0) {
@@ -1947,7 +2401,7 @@ function updateTotalPrintDuration(printerId) {
     let totalMinutesForLegacyField = Math.round(sumPrintSeconds / 60);
 
     // Add current active print duration (if any)
-    const activeSess = stitchedSessions.find(sess => (sess.status === 'printing' || sess.status === 'paused') && (sess.fileName === 'klippy.log' || sess.fileName === 'printer_logs.txt'));
+    const activeSess = stitchedSessions.find(sess => (sess.status === 'printing' || sess.status === 'paused') && sess.fileName === 'klippy.log');
     if (activeSess && activeSess.activeDuration) {
         const match = String(activeSess.activeDuration).match(/(\d+)/);
         if (match) {

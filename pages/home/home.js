@@ -2612,6 +2612,11 @@ function formatDuration(totalMins) {
 }
 
 function getPrintSessionMinutes(session) {
+    // 0. C2P: printer-reported exact duration in seconds (most accurate)
+    if (session.totalTime && session.totalTime > 0) {
+        return Math.round(session.totalTime / 60);
+    }
+
     // 1. Try to find duration from session events
     for (const evt of session.events) {
         const text = evt.text || '';
@@ -2639,10 +2644,12 @@ function getPrintSessionMinutes(session) {
 }
 
 function getPrintSessionDuration(session) {
+    // C2P: pre-formatted "X dk" string set directly from duration_s
     if (session.duration) return session.duration;
     const mins = getPrintSessionMinutes(session);
     return mins > 0 ? formatDuration(mins) : null;
 }
+
 
 function getPrintSessionPeaks(session) {
     if (session.peaksText) return session.peaksText;
@@ -2677,14 +2684,35 @@ function extractAnalysisTime(text) {
 }
 
 function extractAnalysisFile(text) {
-    const paren = text.match(/\(([^)]+)\)\s*:/);
-    if (paren) return paren[1].trim();
+    // Find all (group) before the trailing ': timestamp'
+    // Pick the FIRST group that looks like a filename (contains a dot or slash)
+    // This prevents resume/status annotations like "(Kaldığı Yerden Devam)" from being mistaken as filenames
+    const allParens = [];
+    const parenRe = /\(([^)]+)\)/g;
+    let m;
+    while ((m = parenRe.exec(text)) !== null) {
+        allParens.push(m[1].trim());
+    }
+    // First pass: look for an entry that contains a dot (e.g. "file.gcode")
+    for (const p of allParens) {
+        if (p.includes('.') && !p.includes('Yerden') && !p.includes('Devam') && !p.includes('Hata')) {
+            return p;
+        }
+    }
+    // Second pass: if no dotted entry, fall back to first entry (excludes known non-file labels)
+    const NON_FILE = ['Kaldığı Yerden Devam', 'Devam', 'DEVAM', 'İptal', 'Hata', 'Sistem Hatası'];
+    for (const p of allParens) {
+        if (!NON_FILE.some(nf => p.includes(nf))) {
+            return p;
+        }
+    }
     const dosya = text.match(/Dosya:\s*(.+?)(?:\s*\(|$)/i);
     if (dosya) return dosya[1].trim();
     const progDosya = text.match(/Dosya:\s*([^|]+)/i);
     if (progDosya) return progDosya[1].trim();
     return 'Bilinmeyen dosya';
 }
+
 
 function buildPrintSessions(baskiRaporu) {
     // Sort all events chronologically by their timestamps
@@ -2768,6 +2796,15 @@ function buildPrintSessions(baskiRaporu) {
             continue;
         }
 
+        if (item.type === 'error' || /Baskı İptal \(Hata/i.test(text) || /Sistem Hatası/i.test(text) || /Hata/i.test(text)) {
+            if (!current) startSession(file, time, item);
+            current.status = 'failed';
+            current.endTime = time;
+            current.events.push(item);
+            closeSession();
+            continue;
+        }
+
         if (item.type === 'progress' || text.includes('[PROGRESS]') || text.includes('Yazdırılıyor:')) {
             const progMatch = text.match(/%(\d+)/);
             const newProg = progMatch ? parseInt(progMatch[1], 10) : null;
@@ -2818,10 +2855,11 @@ function buildPrintSessions(baskiRaporu) {
 
 function getPrintSessionMeta(status) {
     const map = {
-        printing: { label: 'Yazdırılıyor', color: '#ff6b00', bg: 'rgba(255, 107, 0, 0.12)', icon: '🖨️' },
-        paused: { label: 'Duraklatıldı', color: '#ffc107', bg: 'rgba(255, 193, 7, 0.12)', icon: '⏸️' },
-        completed: { label: 'Bitti', color: '#2ec4b6', bg: 'rgba(46, 196, 182, 0.12)', icon: '✅' },
-        cancelled: { label: 'İptal Edildi', color: '#ef476f', bg: 'rgba(239, 71, 111, 0.12)', icon: '❌' }
+        printing: { label: 'Printing', color: '#ff6b00', bg: 'rgba(255, 107, 0, 0.12)', icon: '🖨️' },
+        paused: { label: 'Paused', color: '#ffc107', bg: 'rgba(255, 193, 7, 0.12)', icon: '⏸️' },
+        completed: { label: 'Completed', color: '#2ec4b6', bg: 'rgba(46, 196, 182, 0.12)', icon: '✅' },
+        cancelled: { label: 'Cancelled', color: '#ef476f', bg: 'rgba(239, 71, 111, 0.12)', icon: '❌' },
+        failed: { label: 'Failed', color: '#ef476f', bg: 'rgba(239, 71, 111, 0.12)', icon: '⚠️' }
     };
     return map[status] || map.printing;
 }
@@ -2829,7 +2867,7 @@ function getPrintSessionMeta(status) {
 function renderPrintSessionsHtml(sessions, page = 1, perPage = 10) {
     if (!sessions.length) {
         return {
-            html: `<span style="font-size: 12px; color: var(--text-muted);">Herhangi bir baskı oturumu bulunmuyor.</span>`,
+            html: `<span style="font-size: 12px; color: var(--text-muted);">No print sessions found.</span>`,
             totalPages: 1,
             safePage: 1,
             totalItems: 0,
@@ -2878,11 +2916,11 @@ function renderPrintSessionsHtml(sessions, page = 1, perPage = 10) {
         const progressText = session.lastProgress !== null ? `%${session.lastProgress}` : '-';
         const timeText = session.endTime || session.startTime || '-';
         const shortFile = session.file.length > 52 ? session.file.substring(0, 50) + '…' : session.file;
-        const durationText = getPrintSessionDuration(session) || 'Bilinmeyen süre';
+        const durationText = getPrintSessionDuration(session) || 'Unknown duration';
         const startTimeText = session.startTime || '-';
 
-        const originalTimeHtml = `<strong>Son işlem:</strong> ${timeText}`;
-        const durationTimeHtml = `<strong>Süre:</strong> <span style="color: var(--accent); font-weight: 700;">${durationText}</span> <span style="font-size: 10px; color: var(--text-muted); font-weight: normal;">(Başlangıç: ${startTimeText})</span>`;
+        const originalTimeHtml = `<strong>Last event:</strong> ${timeText}`;
+        const durationTimeHtml = `<strong>Duration:</strong> <span style="color: var(--accent); font-weight: 700;">${durationText}</span> <span style="font-size: 10px; color: var(--text-muted); font-weight: normal;">(Start: ${startTimeText})</span>`;
 
         const timeline = session.events
             .filter(e => {
@@ -2902,7 +2940,7 @@ function renderPrintSessionsHtml(sessions, page = 1, perPage = 10) {
                 else if (e.type === 'cancel' || /İptal/i.test(t)) icon = '❌';
                 else if (t.includes('[PROGRESS]') || t.includes('Yazdırılıyor:')) icon = '📊';
                 const display = t.replace(/^\[[^\]]+\]\s*/, '');
-                return `<div style="font-size: 11px; color: var(--text-muted); line-height: 1.45;">${icon} ${display}</div>`;
+                return `<div style="font-size: 11px; color: var(--text-muted); line-height: 1.45;">${icon} ${escapeHtml(display)}</div>`;
             }).join('');
 
         const timelineHtml = (session.status === 'cancelled' && timeline)
@@ -2912,7 +2950,7 @@ function renderPrintSessionsHtml(sessions, page = 1, perPage = 10) {
                         <svg class="timeline-summary-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="transition: transform 0.15s; margin-right: 2px;">
                             <polyline points="9 18 15 12 9 6"></polyline>
                         </svg>
-                        Olay Geçmişini Göster
+                        Show Event History
                     </summary>
                     <div style="margin-top: 6px; display: flex; flex-direction: column; gap: 4.5px; cursor: default; padding-left: 12px; border-left: 1px solid rgba(255, 255, 255, 0.05);" onclick="event.stopPropagation();">
                         ${timeline}
@@ -2923,7 +2961,42 @@ function renderPrintSessionsHtml(sessions, page = 1, perPage = 10) {
 
         const isOpen = session.status === 'printing' || session.status === 'paused';
         const peaksText = getPrintSessionPeaks(session);
-        const peaksHtml = peaksText ? `<span style="color: #ffc107;"><strong>Zirve:</strong> ${peaksText}</span>` : '';
+        const peaksHtml = peaksText ? `<span style="color: #ffc107;"><strong>Peak:</strong> ${peaksText}</span>` : '';
+
+        // ── C2P Metadata Badges ──────────────────────────────────────
+        const isC2p = !!session.jobId;
+
+        // Job ID chip
+        const jobIdHtml = isC2p
+            ? `<span style="font-size: 9.5px; font-family: monospace; background: rgba(0,206,201,0.1); color: #00cec9; border: 1px solid rgba(0,206,201,0.25); border-radius: 4px; padding: 1px 6px; white-space: nowrap; letter-spacing: 0.3px;" title="C2P Job ID">🔖 ${session.jobId}</span>`
+            : '';
+
+        // Resume badge
+        const resumeHtml = (isC2p && session.resume === 1)
+            ? `<span style="font-size: 9.5px; background: rgba(108,92,231,0.15); color: #a29bfe; border: 1px solid rgba(108,92,231,0.3); border-radius: 4px; padding: 1px 6px; white-space: nowrap;">▶ Resumed</span>`
+            : '';
+
+        // Tool badge
+        const toolHtml = (isC2p && session.tool !== null && session.tool !== undefined)
+            ? `<span style="font-size: 9.5px; background: rgba(253,203,110,0.12); color: #fdcb6e; border: 1px solid rgba(253,203,110,0.25); border-radius: 4px; padding: 1px 6px; white-space: nowrap;">🔧 T${session.tool}</span>`
+            : '';
+
+        // Z height badge
+        const zHtml = (isC2p && session.z !== null && session.z !== undefined)
+            ? `<span style="font-size: 9.5px; background: rgba(116,185,255,0.1); color: #74b9ff; border: 1px solid rgba(116,185,255,0.25); border-radius: 4px; padding: 1px 6px; white-space: nowrap;">Z: ${parseFloat(session.z).toFixed(2)} mm</span>`
+            : '';
+
+        // Error message row
+        const errorHtml = (isC2p && session.error)
+            ? `<div style="margin-top: 5px; padding: 5px 8px; background: rgba(239,71,111,0.1); border: 1px solid rgba(239,71,111,0.25); border-radius: 5px; font-size: 10.5px; color: #ef476f; display: flex; align-items: flex-start; gap: 5px; word-break: break-word;">
+                   <span style="flex-shrink:0;">⚠️</span>
+                   <span><strong>Error:</strong> ${escapeHtml(session.error)}</span>
+               </div>`
+            : '';
+
+        const c2pMetaBadgesHtml = (jobIdHtml || resumeHtml || toolHtml || zHtml)
+            ? `<div style="display: flex; flex-wrap: wrap; gap: 5px; align-items: center; margin-top: 5px;">${jobIdHtml}${resumeHtml}${toolHtml}${zHtml}</div>`
+            : '';
 
         return `
             <details class="print-session-details" ${isOpen ? 'open' : ''} style="background: var(--surface-2); border: 1px solid var(--border-light); border-left: 3px solid ${meta.color}; border-radius: 8px; margin-bottom: 8px; outline: none; display: block; overflow: hidden; box-shadow: var(--shadow-xs); flex-shrink: 0;">
@@ -2933,21 +3006,21 @@ function renderPrintSessionsHtml(sessions, page = 1, perPage = 10) {
                             <polyline points="9 18 15 12 9 6"></polyline>
                         </svg>
                         <div style="min-width: 0; flex: 1;">
-                            <div style="font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 2px;">Baskı #${totalItems - globalIdx}</div>
-                            <div style="font-size: 12px; font-weight: 600; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${session.file}">${shortFile}</div>
+                            <div style="font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 2px;">Print #${totalItems - globalIdx}${isC2p ? ' <span style="font-size: 9px; color: #00cec9; font-weight: 700; text-transform: none; letter-spacing: 0;">· C2P</span>' : ''}</div>
+                            <div style="font-size: 12px; font-weight: 600; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${escapeHtml(session.file)}">${escapeHtml(shortFile)}</div>
                         </div>
                     </div>
                     <span style="flex-shrink: 0; font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 999px; color: ${meta.color}; background: ${meta.bg}; border: 1px solid ${meta.color}33; white-space: nowrap;">${meta.icon} ${meta.label}</span>
                 </summary>
                 <div style="padding: 0 12px 12px 12px; border-top: 1px solid var(--border-light); padding-top: 8px; display: flex; flex-direction: column; gap: 8px;" onclick="event.stopPropagation();">
-                    <div style="display: flex; gap: 14px; font-size: 11px; color: var(--text-light); margin-bottom: ${timeline ? '8px' : '0'}; flex-wrap: wrap; align-items: center;">
-                        <span><strong>İlerleme:</strong> ${progressText}</span>
+                    <div style="display: flex; gap: 14px; font-size: 11px; color: var(--text-light); margin-bottom: ${(c2pMetaBadgesHtml || errorHtml || timeline) ? '0' : '0'}; flex-wrap: wrap; align-items: center;">
+                        <span><strong>Progress:</strong> ${progressText}</span>
                         <span class="session-time-toggle" style="cursor: pointer; user-select: none; border-bottom: 1px dashed rgba(255, 255, 255, 0.35); padding-bottom: 1px; transition: color 0.15s;" 
                               data-original="${originalTimeHtml.replace(/"/g, '&quot;')}" 
                               data-duration="${durationTimeHtml.replace(/"/g, '&quot;')}" 
                               data-state="original" 
                               onclick="toggleSessionTimeDetail(this)">
-                            <strong>Son işlem:</strong> ${timeText}
+                            <strong>Last event:</strong> ${timeText}
                         </span>
                         ${peaksHtml ? `<span>${peaksHtml}</span>` : ''}
                     </div>
@@ -2977,9 +3050,9 @@ function renderAnalysisPaginationBar(scope, currentPage, totalPages, metaText) {
     const nextDisabled = currentPage >= totalPages;
     return `
         <div class="analysis-pagination-bar" data-analysis-scope="${scope}" style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 10px; padding: 8px 10px; background: var(--surface-2); border-radius: 8px; border: 1px solid var(--border-light); flex-wrap: wrap;">
-            <button type="button" class="btn-secondary" data-analysis-scope="${scope}" data-analysis-page="prev" ${prevDisabled ? 'disabled' : ''} style="padding: 4px 10px; font-size: 11px; height: 28px; margin: 0; width: auto; opacity: ${prevDisabled ? 0.45 : 1}; cursor: ${prevDisabled ? 'not-allowed' : 'pointer'};">← Önceki</button>
+            <button type="button" class="btn-secondary" data-analysis-scope="${scope}" data-analysis-page="prev" ${prevDisabled ? 'disabled' : ''} style="padding: 4px 10px; font-size: 11px; height: 28px; margin: 0; width: auto; opacity: ${prevDisabled ? 0.45 : 1}; cursor: ${prevDisabled ? 'not-allowed' : 'pointer'};">← Prev</button>
             <span style="font-size: 11.5px; font-weight: 600; color: var(--text-light); text-align: center;">${metaText}</span>
-            <button type="button" class="btn-secondary" data-analysis-scope="${scope}" data-analysis-page="next" ${nextDisabled ? 'disabled' : ''} style="padding: 4px 10px; font-size: 11px; height: 28px; margin: 0; width: auto; opacity: ${nextDisabled ? 0.45 : 1}; cursor: ${nextDisabled ? 'not-allowed' : 'pointer'};">Sonraki →</button>
+            <button type="button" class="btn-secondary" data-analysis-scope="${scope}" data-analysis-page="next" ${nextDisabled ? 'disabled' : ''} style="padding: 4px 10px; font-size: 11px; height: 28px; margin: 0; width: auto; opacity: ${nextDisabled ? 0.45 : 1}; cursor: ${nextDisabled ? 'not-allowed' : 'pointer'};">Next →</button>
         </div>
     `;
 }
@@ -2988,26 +3061,45 @@ function escapeAnalysisScopeKey(value) {
     return String(value).replace(/[^a-zA-Z0-9_-]/g, '_');
 }
 
+function escapeHtml(unsafe) {
+    if (!unsafe) return '';
+    return String(unsafe)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
+function formatLogFileName(fileName) {
+    if (fileName === 'klippy.log') return 'Today';
+    const match = fileName.match(/klippy\.log\.(\d{4})-(\d{2})-(\d{2})/);
+    if (match) {
+        return `${match[2]}/${match[3]}/${match[1]}`; // MM/DD/YYYY format
+    }
+    return fileName;
+}
+
 window.showAnalysisResults = async function (id) {
     let rawTextContent = '';
     const p = printersState.find(x => x.id === id);
     if (!p) {
         console.error('[Analysis] Printer not found with ID:', id);
         console.error('[Analysis] Available printers:', printersState.map(x => ({ id: x.id, name: x.name })));
-        showCustomConfirm('Hata', 'Yazıcı bulunamadı. Lütfen sayfayı yenileyin.', 'Tamam', null, 'error');
+        showCustomConfirm('Error', 'Printer not found. Please refresh the page.', 'OK', null, 'error');
         return;
     }
 
     console.log('[Analysis] Opening modal for printer:', p.name, 'ID:', id);
 
     if (!p.logFolderPath) {
-        showCustomConfirm('Hata', 'Bu yazıcının log kayıt yolu tanımlanmamış. Lütfen ayarlardan düzenleyin.', 'Tamam', null, 'error');
+        showCustomConfirm('Error', 'Log folder path is not configured for this printer. Please edit it in settings.', 'OK', null, 'error');
         return;
     }
 
     const printerFolder = getPrinterFolderPath(p);
     if (!printerFolder) {
-        showCustomConfirm('Hata', 'Bu yazıcının log kayıt yolu tanımlanmamış. Lütfen ayarlardan düzenleyin.', 'Tamam', null, 'error');
+        showCustomConfirm('Error', 'Log folder path is not configured for this printer. Please edit it in settings.', 'OK', null, 'error');
         return;
     }
 
@@ -3020,18 +3112,18 @@ window.showAnalysisResults = async function (id) {
     const tabRaw = document.getElementById('analysis-tab-raw');
 
     // Clear previous content immediately when switching printers
-    titleEl.innerText = `${p.name || 'Bilinmiyor'} - Log Analiz Raporu`;
+    titleEl.innerText = `${p.name || 'Unknown'} - Log Analysis Report`;
 
     // Fetch and display total printing duration asynchronously
     ipcRenderer.invoke('get-printer-total-duration', id).then(totalMins => {
         const totalDurationText = formatDuration(totalMins);
-        titleEl.innerText = `${p.name || 'Bilinmiyor'} - Log Analiz Raporu (Toplam Baskı Süresi: ${totalDurationText})`;
+        titleEl.innerText = `${p.name || 'Unknown'} - Log Analysis Report (Total Print Time: ${totalDurationText})`;
     }).catch(err => {
         console.error('[Analysis] Failed to load total print duration:', err);
     });
-    pathEl.innerText = 'Yerel Veritabanı';
+    pathEl.innerText = 'Local Database';
     preEl.innerText = '';
-    structuredDiv.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 30px;">Yükleniyor...</div>';
+    structuredDiv.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 30px;">Loading...</div>';
     tabStructured.classList.add('active');
     tabRaw.classList.remove('active');
     preEl.classList.add('hidden');
@@ -3046,7 +3138,6 @@ window.showAnalysisResults = async function (id) {
     if (analysisViewState.printerId !== id) {
         analysisViewState.printerId = id;
         analysisViewState.filesPage = 1;
-        analysisViewState.filterVal = 'all';
         analysisViewState.customStartDate = '';
         analysisViewState.customEndDate = '';
         Object.keys(analysisViewState.sessionPages).forEach(k => delete analysisViewState.sessionPages[k]);
@@ -3080,7 +3171,7 @@ window.showAnalysisResults = async function (id) {
 
     function renderStructuredReport(runs, printerStats) {
         if (runs.length === 0) {
-            structuredDiv.innerHTML = `<div style="text-align: center; color: var(--text-muted); padding: 30px;">Gösterilecek analiz verisi bulunamadı.</div>`;
+            structuredDiv.innerHTML = `<div style="text-align: center; color: var(--text-muted); padding: 30px;">No analysis data to display.</div>`;
             return;
         }
 
@@ -3097,28 +3188,28 @@ window.showAnalysisResults = async function (id) {
         const localTotalMins = printerTotalDurations[id] || 0;
         const formattedTotalDuration = formatDuration(localTotalMins);
 
-        const statsTitleHtml = `<h3 style="font-size: 13px; font-weight: 700; color: var(--text-main, #fff); margin: 0 0 12px 0; display: flex; align-items: center; gap: 8px; text-transform: uppercase; letter-spacing: 0.5px; opacity: 0.9;">📊 Detaylı Baskı İstatistikleri</h3>`;
+        const statsTitleHtml = `<h3 style="font-size: 13px; font-weight: 700; color: var(--text-main, #fff); margin: 0 0 12px 0; display: flex; align-items: center; gap: 8px; text-transform: uppercase; letter-spacing: 0.5px; opacity: 0.9;">📊 Detailed Print Statistics</h3>`;
 
         const statsGridHtml = `
             <div class="analysis-stats-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 20px;">
                 <div class="analysis-stat-card" style="background: var(--surface-2, rgba(255, 255, 255, 0.02)); border: 1px solid var(--border, rgba(255, 255, 255, 0.08)); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 6px; transition: all 0.3s ease; box-shadow: 0 4px 20px rgba(0,0,0,0.15);">
-                    <span style="font-size: 10px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">📦 Toplam Baskı Sayısı</span>
+                    <span style="font-size: 10px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">📦 Total Print Jobs</span>
                     <strong style="font-size: 18px; color: var(--text-main, #fff); font-family: 'Outfit', sans-serif;">${printerStats ? printerStats.totalPrintJobs : 0}</strong>
                 </div>
                 <div class="analysis-stat-card" style="background: var(--surface-2, rgba(255, 255, 255, 0.02)); border: 1px solid var(--border, rgba(255, 255, 255, 0.08)); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 6px; transition: all 0.3s ease; box-shadow: 0 4px 20px rgba(0,0,0,0.15);">
-                    <span style="font-size: 10px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">🏆 En Uzun Baskı</span>
-                    <strong style="font-size: 18px; color: var(--accent); font-family: 'Outfit', sans-serif;">${printerStats ? printerStats.longestJob : '0sn'}</strong>
+                    <span style="font-size: 10px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">🏆 Longest Print</span>
+                    <strong style="font-size: 18px; color: var(--accent); font-family: 'Outfit', sans-serif;">${printerStats ? printerStats.longestJob : '0s'}</strong>
                 </div>
                 <div class="analysis-stat-card" style="background: var(--surface-2, rgba(255, 255, 255, 0.02)); border: 1px solid var(--border, rgba(255, 255, 255, 0.08)); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 6px; transition: all 0.3s ease; box-shadow: 0 4px 20px rgba(0,0,0,0.15);">
-                    <span style="font-size: 10px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">⏱️ Toplam Çalışma</span>
-                    <strong style="font-size: 18px; color: #2ec4b6; font-family: 'Outfit', sans-serif;">${printerStats ? printerStats.totalTime : '0sn'}</strong>
+                    <span style="font-size: 10px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">⏱️ Total Runtime</span>
+                    <strong style="font-size: 18px; color: #2ec4b6; font-family: 'Outfit', sans-serif;">${printerStats ? printerStats.totalTime : '0s'}</strong>
                 </div>
                 <div class="analysis-stat-card" style="background: var(--surface-2, rgba(255, 255, 255, 0.02)); border: 1px solid var(--border, rgba(255, 255, 255, 0.08)); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 6px; transition: all 0.3s ease; box-shadow: 0 4px 20px rgba(0,0,0,0.15);">
-                    <span style="font-size: 10px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">⚡ Net Baskı Süresi</span>
-                    <strong style="font-size: 18px; color: #ffbc42; font-family: 'Outfit', sans-serif;">${printerStats ? printerStats.totalPrintTime : '0sn'}</strong>
+                    <span style="font-size: 10px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">⚡ Net Print Time</span>
+                    <strong style="font-size: 18px; color: #ffbc42; font-family: 'Outfit', sans-serif;">${printerStats ? printerStats.totalPrintTime : '0s'}</strong>
                 </div>
                 <div class="analysis-stat-card" style="background: var(--surface-2, rgba(255, 255, 255, 0.02)); border: 1px solid var(--border, rgba(255, 255, 255, 0.08)); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 6px; transition: all 0.3s ease; box-shadow: 0 4px 20px rgba(0,0,0,0.15);">
-                    <span style="font-size: 10px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">📈 Ortalama Süre</span>
+                    <span style="font-size: 10px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">📈 Avg. Time / Print</span>
                     <strong style="font-size: 18px; color: #9b5de5; font-family: 'Outfit', sans-serif;">${printerStats ? printerStats.avgTimePerPrint : '0sn'}</strong>
                 </div>
             </div>
@@ -3134,25 +3225,24 @@ window.showAnalysisResults = async function (id) {
         const summaryBarHtml = `
             <div class="analysis-summary-bar" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; background: rgba(255, 255, 255, 0.02); padding: 12px; border-radius: 8px; border: 1px solid var(--border-light, rgba(255,255,255,0.08));">
                 <div class="summary-item" style="text-align: center;">
-                    <span style="display: block; font-size: 11px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">⏱️ Toplam Baskı Süresi</span>
+                    <span style="display: block; font-size: 11px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">⏱️ Total Print Time</span>
                     <strong style="font-size: 16px; color: var(--accent); font-family: 'Outfit', sans-serif;">${formattedTotalDuration}</strong>
                 </div>
                 <div class="summary-item" style="text-align: center; border-left: 1px solid var(--border-light, rgba(255,255,255,0.08));">
-                    <span style="display: block; font-size: 11px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">✅ Başarılı Baskılar</span>
+                    <span style="display: block; font-size: 11px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">✅ Successful Prints</span>
                     <strong style="font-size: 16px; color: #2ec4b6; font-family: 'Outfit', sans-serif;">${totalSuccess}</strong>
                 </div>
                 <div class="summary-item" style="text-align: center; border-left: 1px solid var(--border-light, rgba(255,255,255,0.08));">
-                    <span style="display: block; font-size: 11px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">❌ İptal Edilenler</span>
+                    <span style="display: block; font-size: 11px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">❌ Cancelled</span>
                     <strong style="font-size: 16px; color: #ef476f; font-family: 'Outfit', sans-serif;">${totalCancelled}</strong>
                 </div>
                 <div class="summary-item" style="text-align: center; border-left: 1px solid var(--border-light, rgba(255,255,255,0.08));">
-                    <span style="display: block; font-size: 11px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">⚠️ Yakalanan Hatalar</span>
+                    <span style="display: block; font-size: 11px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">⚠️ Captured Errors</span>
                     <strong style="font-size: 16px; color: #ffbc42; font-family: 'Outfit', sans-serif;">${totalErrors}</strong>
                 </div>
             </div>
         `;
 
-        const filterVal = analysisViewState.filterVal || 'all';
         const customStartDate = analysisViewState.customStartDate || '';
         const customEndDate = analysisViewState.customEndDate || '';
 
@@ -3174,41 +3264,32 @@ window.showAnalysisResults = async function (id) {
         const controlsHtml = `
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding: 2px; flex-wrap: wrap; gap: 10px;">
                 <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
-                    <!-- Tarih Filtresi -->
+                    <!-- Date Filter -->
                     <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
-                        <span style="font-size: 12px; font-weight: 600; color: var(--text-muted);">Tarih Filtresi:</span>
-                        <select id="analysis-filter-select" style="background: var(--surface-3, #090a0f); border: 1px solid var(--border-light, rgba(255, 255, 255, 0.08)); border-radius: 6px; color: #fff; font-size: 11.5px; font-weight: 600; padding: 4px 8px; height: 28px; outline: none; cursor: pointer; transition: border-color 0.2s;">
-                            <option value="all" ${filterVal === 'all' ? 'selected' : ''}>⌛ Tüm Zamanlar</option>
-                            <option value="24h" ${filterVal === '24h' ? 'selected' : ''}>⏱️ Son 24 Saat</option>
-                            <option value="7d" ${filterVal === '7d' ? 'selected' : ''}>📅 Son 7 Gün</option>
-                            <option value="30d" ${filterVal === '30d' ? 'selected' : ''}>📅 Son 30 Gün</option>
-                            <option value="90d" ${filterVal === '90d' ? 'selected' : ''}>📅 Son 90 Gün</option>
-                            <option value="365d" ${filterVal === '365d' ? 'selected' : ''}>📅 Son 1 Yıl</option>
-                            <option value="custom" ${filterVal === 'custom' ? 'selected' : ''}>📅 Özel Tarih Aralığı</option>
-                        </select>
+                        <span style="font-size: 12px; font-weight: 600; color: var(--text-muted);">Date Filter:</span>
                         <div id="analysis-custom-date-container" style="display: flex; align-items: center; gap: 6px;">
                             <input type="date" id="analysis-start-date" value="${customStartDate}" style="background: var(--surface-3, #090a0f); border: 1px solid var(--border-light, rgba(255, 255, 255, 0.08)); border-radius: 6px; color: #fff; font-size: 11.5px; padding: 4px 8px; height: 28px; outline: none; transition: border-color 0.2s;">
-                            <span style="font-size: 11px; color: var(--text-muted);">ve</span>
+                            <span style="font-size: 11px; color: var(--text-muted);">to</span>
                             <input type="date" id="analysis-end-date" value="${customEndDate}" style="background: var(--surface-3, #090a0f); border: 1px solid var(--border-light, rgba(255, 255, 255, 0.08)); border-radius: 6px; color: #fff; font-size: 11.5px; padding: 4px 8px; height: 28px; outline: none; transition: border-color 0.2s;">
                         </div>
                     </div>
-                    <!-- Sıralama Dropdown -->
+                    <!-- Sort Dropdown -->
                     <div style="display: flex; align-items: center; gap: 6px;">
-                        <span style="font-size: 12px; font-weight: 600; color: var(--text-muted);">Sırala:</span>
+                        <span style="font-size: 12px; font-weight: 600; color: var(--text-muted);">Sort:</span>
                         <select id="analysis-sort-select" style="background: var(--surface-3, #090a0f); border: 1px solid var(--border-light, rgba(255, 255, 255, 0.08)); border-radius: 6px; color: #fff; font-size: 11.5px; font-weight: 600; padding: 4px 8px; height: 28px; outline: none; cursor: pointer; transition: border-color 0.2s;">
-                            <option value="newest" selected>📅 Tarih (Yeni -> Eski)</option>
-                            <option value="oldest">📅 Tarih (Eski -> Yeni)</option>
-                            <option value="errors-desc">❌ Hata Sayısı (Çok -> Az)</option>
-                            <option value="errors-asc">❌ Hata Sayısı (Az -> Çok)</option>
+                            <option value="newest" selected>📅 Date (Newest First)</option>
+                            <option value="oldest">📅 Date (Oldest First)</option>
+                            <option value="errors-desc">❌ Error Count (High → Low)</option>
+                            <option value="errors-asc">❌ Error Count (Low → High)</option>
                         </select>
                     </div>
                 </div>
                 <div style="display: flex; gap: 10px;">
                     <button class="btn-secondary" id="analysis-expand-all" style="padding: 4px 12px; font-size: 11.5px; height: 28px; margin: 0; width: auto; font-weight: 600; display: flex; align-items: center; gap: 6px;">
-                        <span>↔️</span> Hepsini Genişlet
+                        <span>↔️</span> Expand All
                     </button>
                     <button class="btn-secondary" id="analysis-collapse-all" style="padding: 4px 12px; font-size: 11.5px; height: 28px; margin: 0; width: auto; font-weight: 600; display: flex; align-items: center; gap: 6px;">
-                        <span>↕️</span> Hepsini Daralt
+                        <span>↕️</span> Collapse All
                     </button>
                 </div>
             </div>
@@ -3220,23 +3301,12 @@ window.showAnalysisResults = async function (id) {
         const container = document.getElementById('analysis-cards-container');
         const filesPaginationEl = document.getElementById('analysis-files-pagination');
         const sortSelect = document.getElementById('analysis-sort-select');
-        const filterSelect = document.getElementById('analysis-filter-select');
 
         let filesPage = analysisViewState.filesPage;
         const sessionPages = analysisViewState.sessionPages;
         let filteredRunsCache = [];
 
         function getRunDate(run) {
-            if (run.fileName === 'printer_logs.txt') {
-                const sessions = buildPrintSessions(run.sections.baskiRaporu);
-                for (const session of sessions) {
-                    const timeStr = session.endTime || session.startTime;
-                    if (!timeStr) continue;
-                    const parsed = parseTrLogDate(timeStr);
-                    if (parsed) return parsed;
-                }
-                return new Date();
-            }
             if (run.fileName === 'klippy.log' || run.fileName === 'Genel Analiz Raporu') {
                 return new Date();
             }
@@ -3247,8 +3317,8 @@ window.showAnalysisResults = async function (id) {
             return new Date(0);
         }
 
-        function isDateInFilterRange(date, filterVal) {
-            if (!date || filterVal === 'all') return true;
+        function isDateInFilterRange(date) {
+            if (!date) return true;
 
             const startValStr = analysisViewState.customStartDate;
             const endValStr = analysisViewState.customEndDate;
@@ -3267,21 +3337,31 @@ window.showAnalysisResults = async function (id) {
         }
 
         function displayCards(pagedRuns, filePageMeta) {
-            const filterVal = filterSelect.value;
+            const isFiltered = (analysisViewState.customStartDate || analysisViewState.customEndDate);
             container.innerHTML = pagedRuns.map(run => {
                 const rawPrintSessions = run.sections.printSessions && run.sections.printSessions.length > 0
                     ? run.sections.printSessions
                     : buildPrintSessions(run.sections.baskiRaporu);
                 const printSessions = rawPrintSessions.filter(s => {
                     const sDate = parseTrLogDate(s.endTime || s.startTime);
-                    return isDateInFilterRange(sDate, filterVal);
+                    return isDateInFilterRange(sDate);
+                });
+
+                // Sort print sessions descending (newest first)
+                printSessions.sort((a, b) => {
+                    const dateA = parseTrLogDate(a.endTime || a.startTime);
+                    const dateB = parseTrLogDate(b.endTime || b.startTime);
+                    if (!dateA && !dateB) return 0;
+                    if (!dateA) return 1;
+                    if (!dateB) return -1;
+                    return dateB - dateA;
                 });
 
                 const errors = run.sections.errors
                     .map((err, idx) => ({ ...err, originalIndex: idx }))
                     .filter(err => {
                         const eDate = parseTrLogDate(err.time);
-                        return isDateInFilterRange(eDate, filterVal);
+                        return isDateInFilterRange(eDate);
                     })
                     .sort((a, b) => {
                         const dateA = parseTrLogDate(a.time);
@@ -3309,15 +3389,16 @@ window.showAnalysisResults = async function (id) {
                     printing: printSessions.filter(s => s.status === 'printing').length,
                     paused: printSessions.filter(s => s.status === 'paused').length,
                     completed: printSessions.filter(s => s.status === 'completed').length,
-                    cancelled: printSessions.filter(s => s.status === 'cancelled').length
+                    cancelled: printSessions.filter(s => s.status === 'cancelled').length,
+                    failed: printSessions.filter(s => s.status === 'failed').length
                 };
-                const successCount = filterVal === 'all'
+                const successCount = !isFiltered
                     ? Math.max(run.sections.summary.success || 0, sessionCounts.completed)
                     : sessionCounts.completed;
-                const cancelCount = filterVal === 'all'
+                const cancelCount = !isFiltered
                     ? Math.max(run.sections.summary.cancelled || 0, sessionCounts.cancelled)
                     : sessionCounts.cancelled;
-                const errorCount = filterVal === 'all'
+                const errorCount = !isFiltered
                     ? (run.sections.summary.errors || 0)
                     : errors.length;
 
@@ -3328,7 +3409,7 @@ window.showAnalysisResults = async function (id) {
                     scopeKey,
                     sessionRender.safePage,
                     sessionRender.totalPages,
-                    `Sayfa ${sessionRender.safePage} / ${sessionRender.totalPages} · Oturum ${sessionRender.rangeStart}-${sessionRender.rangeEnd} / ${sessionRender.totalItems}`
+                    `Page ${sessionRender.safePage} / ${sessionRender.totalPages} · Sessions ${sessionRender.rangeStart}-${sessionRender.rangeEnd} / ${sessionRender.totalItems}`
                 );
 
                 const printHistoryHtml = sessionRender.html + sessionPaginationHtml;
@@ -3339,11 +3420,11 @@ window.showAnalysisResults = async function (id) {
                             <table style="display: table; width: 100%; min-width: 100%; border-collapse: collapse; text-align: left; font-size: 13px; color: var(--text-main);">
                                 <thead style="display: table-header-group;">
                                     <tr style="display: table-row; height: 32px;">
-                                        <th style="display: table-cell; position: sticky; top: 0; z-index: 10; background: var(--surface-3); border-bottom: 1px solid var(--border-light); padding: 8px 12px; font-weight: 700; color: var(--text-main); text-align: left; width: 80px; min-width: 80px;">Saat</th>
-                                        <th style="display: table-cell; position: sticky; top: 0; z-index: 10; background: var(--surface-3); border-bottom: 1px solid var(--border-light); padding: 8px 12px; font-weight: 700; color: var(--text-main); text-align: left; width: 130px; min-width: 130px;">Hata Kodu</th>
-                                        <th style="display: table-cell; position: sticky; top: 0; z-index: 10; background: var(--surface-3); border-bottom: 1px solid var(--border-light); padding: 8px 12px; font-weight: 700; color: var(--text-main); text-align: left; width: 180px; min-width: 180px;">Hata Başlığı</th>
-                                        <th style="display: table-cell; position: sticky; top: 0; z-index: 10; background: var(--surface-3); border-bottom: 1px solid var(--border-light); padding: 8px 12px; font-weight: 700; color: var(--text-main); text-align: left; width: 70px; min-width: 70px;">Süre</th>
-                                        <th style="display: table-cell; position: sticky; top: 0; z-index: 10; background: var(--surface-3); border-bottom: 1px solid var(--border-light); padding: 8px 12px; font-weight: 700; color: var(--text-main); text-align: left; min-width: 200px;">Ayıklanan Açıklama</th>
+                                        <th style="display: table-cell; position: sticky; top: 0; z-index: 10; background: var(--surface-3); border-bottom: 1px solid var(--border-light); padding: 8px 12px; font-weight: 700; color: var(--text-main); text-align: left; width: 80px; min-width: 80px;">Time</th>
+                                        <th style="display: table-cell; position: sticky; top: 0; z-index: 10; background: var(--surface-3); border-bottom: 1px solid var(--border-light); padding: 8px 12px; font-weight: 700; color: var(--text-main); text-align: left; width: 130px; min-width: 130px;">Error Code</th>
+                                        <th style="display: table-cell; position: sticky; top: 0; z-index: 10; background: var(--surface-3); border-bottom: 1px solid var(--border-light); padding: 8px 12px; font-weight: 700; color: var(--text-main); text-align: left; width: 180px; min-width: 180px;">Error Title</th>
+                                        <th style="display: table-cell; position: sticky; top: 0; z-index: 10; background: var(--surface-3); border-bottom: 1px solid var(--border-light); padding: 8px 12px; font-weight: 700; color: var(--text-main); text-align: left; width: 70px; min-width: 70px;">Duration</th>
+                                        <th style="display: table-cell; position: sticky; top: 0; z-index: 10; background: var(--surface-3); border-bottom: 1px solid var(--border-light); padding: 8px 12px; font-weight: 700; color: var(--text-main); text-align: left; min-width: 200px;">Description</th>
                                     </tr>
                                 </thead>
                                 <tbody style="display: table-row-group;">
@@ -3364,14 +3445,14 @@ window.showAnalysisResults = async function (id) {
                         })();
                         return `
                                             <tr style="${rowStyle}" ${hoverAttr} data-original-bg="${rowBg}" onclick="${hasDetail ? 'toggleErrorDetail(this)' : ''}">
-                                                <td style="display: table-cell; padding: 8px 12px; white-space: nowrap; color: var(--text-main); font-family: monospace; text-align: left; vertical-align: middle; width: 80px; min-width: 80px;" title="${err.time} (Tam Tarih)">${errTimeDisplay}</td>
+                                                <td style="display: table-cell; padding: 8px 12px; white-space: nowrap; color: var(--text-main); font-family: monospace; text-align: left; vertical-align: middle; width: 80px; min-width: 80px;" title="${err.time} (Full Date)">${errTimeDisplay}</td>
                                                 <td style="display: table-cell; padding: 8px 12px; white-space: nowrap; text-align: left; vertical-align: middle; width: 130px; min-width: 130px;">
                                                     <span class="printer-status-badge printing" style="padding: 2px 6px; font-size: 11px; font-family: monospace; font-weight: 600; max-width: 135px; display: inline-block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle;" title="${err.code || err.type || ''}">${err.code || err.type || ''}</span>
-                                                    ${hasDetail ? '<span style="font-size: 11px; margin-left: 4px; color: var(--accent);">🔍 Detay</span>' : ''}
+                                                    ${hasDetail ? '<span style="font-size: 11px; margin-left: 4px; color: var(--accent);">🔍 Detail</span>' : ''}
                                                 </td>
-                                                <td style="display: table-cell; padding: 8px 12px; font-weight: 600; color: var(--text-main); text-align: left; vertical-align: middle; width: 180px; min-width: 180px;">${err.title}</td>
+                                                <td style="display: table-cell; padding: 8px 12px; font-weight: 600; color: var(--text-main); text-align: left; vertical-align: middle; width: 180px; min-width: 180px;">${escapeHtml(err.title)}</td>
                                                 <td style="display: table-cell; padding: 8px 12px; color: var(--text-light); text-align: left; vertical-align: middle; width: 70px; min-width: 70px;">${err.duration || '-'}</td>
-                                                <td style="display: table-cell; padding: 8px 12px; color: var(--text-muted); word-break: break-word; line-height: 1.4; text-align: left; vertical-align: middle; min-width: 200px;">${err.desc}</td>
+                                                <td style="display: table-cell; padding: 8px 12px; color: var(--text-muted); word-break: break-word; line-height: 1.4; text-align: left; vertical-align: middle; min-width: 200px;">${escapeHtml(err.desc)}</td>
                                             </tr>
                                             ${hasDetail ? `
                                                 <tr class="error-detail-row" style="display: none; background: rgba(239, 71, 111, 0.04); border-bottom: 1px solid rgba(255, 255, 255, 0.04);">
@@ -3380,10 +3461,10 @@ window.showAnalysisResults = async function (id) {
                                                             ${err.recentGcodes && err.recentGcodes.length > 0 ? `
                                                                 <div>
                                                                     <div style="font-size: 12.5px; font-weight: 700; color: #ff9a3c; text-transform: uppercase; margin-bottom: 6px; display: flex; align-items: center; gap: 5px;">
-                                                                        <span>⚡</span> Hata Öncesi Son G-Code Komutları
+                                                                        <span>⚡</span> Last G-Code Commands Before Error
                                                                     </div>
                                                                     <div style="display: flex; flex-wrap: wrap; gap: 6px;">
-                                                                        ${err.recentGcodes.map(cmd => `<code style="background: rgba(255, 154, 60, 0.08); color: #ff9a3c; padding: 3px 8px; border-radius: 4px; border: 1px solid rgba(255, 154, 60, 0.15); font-size: 12.5px; font-family: monospace;">${cmd}</code>`).join('')}
+                                                                        ${err.recentGcodes.map(cmd => `<code style="background: rgba(255, 154, 60, 0.08); color: #ff9a3c; padding: 3px 8px; border-radius: 4px; border: 1px solid rgba(255, 154, 60, 0.15); font-size: 12.5px; font-family: monospace;">${escapeHtml(cmd)}</code>`).join('')}
                                                                     </div>
                                                                 </div>
                                                             ` : ''}
@@ -3392,7 +3473,7 @@ window.showAnalysisResults = async function (id) {
                                                                     <div style="font-size: 12.5px; font-weight: 700; color: #ef476f; text-transform: uppercase; margin-bottom: 6px; display: flex; align-items: center; gap: 5px;">
                                                                         <span>📋</span> Hata Öncesi Log Kayıtları (Klippy.log Context)
                                                                     </div>
-                                                                    <pre style="margin: 0; background: #05060a; padding: 10px; border-radius: 5px; border: 1px solid rgba(255, 255, 255, 0.04); font-family: monospace; font-size: 12.5px; color: #e5c7c7; white-space: pre-wrap; max-height: 150px; overflow-y: auto; line-height: 1.4; text-align: left; box-shadow: inset 0 2px 6px rgba(0,0,0,0.6);">${err.context}</pre>
+                                                                    <pre style="margin: 0; background: #05060a; padding: 10px; border-radius: 5px; border: 1px solid rgba(255, 255, 255, 0.04); font-family: monospace; font-size: 12.5px; color: #e5c7c7; white-space: pre-wrap; max-height: 150px; overflow-y: auto; line-height: 1.4; text-align: left; box-shadow: inset 0 2px 6px rgba(0,0,0,0.6);">${escapeHtml(err.context)}</pre>
                                                                 </div>
                                                             ` : ''}
                                                         </div>
@@ -3407,7 +3488,7 @@ window.showAnalysisResults = async function (id) {
                       `
                     : `
                         <div style="padding: 16px; text-align: center; color: var(--text-muted); background: var(--surface-3); border-radius: 6px; border: 1px solid var(--border-light); font-size: 12px; font-weight: 500;">
-                            👍 Aktif log dosyasında eşleşen kritik bir hata kaydı bulunmuyor.
+                            👍 No matching critical errors found in this log file.
                         </div>
                       `;
 
@@ -3431,13 +3512,13 @@ window.showAnalysisResults = async function (id) {
                             </div>
                         `;
                     }).join('')
-                    : `<span style="font-size: 12px; color: var(--text-muted);">Sıcaklık verisi bulunmuyor.</span>`;
+                    : `<span style="font-size: 12px; color: var(--text-muted);">No temperature data available.</span>`;
 
                 const serverEventsHtml = run.sections.serverLogs.length > 0
                     ? `
                         <div style="margin-top: 15px; border-top: 1px solid rgba(255, 255, 255, 0.05); padding-top: 12px;">
                             <details style="cursor: pointer; font-size: 12px; color: var(--text-muted); outline: none;">
-                                <summary style="font-weight: 600; font-family: 'Outfit', sans-serif; color: var(--text-light); transition: color 0.15s; user-select: none;">📡 Sunucu Olay Kayıtları (Server Events) (${run.sections.serverLogs.length})</summary>
+                                <summary style="font-weight: 600; font-family: 'Outfit', sans-serif; color: var(--text-light); transition: color 0.15s; user-select: none;">📡 Server Event Logs (${run.sections.serverLogs.length})</summary>
                                 <div style="margin-top: 10px; background: #05060a; padding: 12px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.03); max-height: 200px; overflow-y: auto; font-family: monospace; font-size: 10.5px; line-height: 1.4; color: #b5ceda; white-space: pre-wrap; word-break: break-all; box-shadow: inset 0 2px 6px rgba(0,0,0,0.6);">
                                     ${run.sections.serverLogs.map((evt, idx) => `
 [${idx + 1}] EVENT: ${evt.type}
@@ -3452,28 +3533,28 @@ ${evt.payload ? JSON.stringify(evt.payload, null, 2) : evt.raw}
                     : '';
 
                 return `
-                    <div class="analysis-run-card ${hasActivity ? '' : 'collapsed'}" style="background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 18px; display: flex; flex-direction: column; gap: 15px; box-shadow: var(--shadow-sm); transition: border-color 0.2s; position: relative; margin-bottom: 16px;">
+                    <div class="analysis-run-card collapsed" style="background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 18px; display: flex; flex-direction: column; gap: 15px; box-shadow: var(--shadow-sm); transition: border-color 0.2s; position: relative; margin-bottom: 16px;">
                         
                         <!-- Card Header -->
                         <div class="analysis-run-card-header" onclick="toggleAnalysisCard(this)" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-light); padding-bottom: 10px; flex-wrap: wrap; gap: 8px; cursor: pointer; user-select: none;">
                             <div style="display: flex; align-items: center; gap: 8px;">
-                                <svg class="analysis-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="transition: transform 0.2s; color: var(--text-muted); ${hasActivity ? 'transform: rotate(90deg);' : ''}">
+                                <svg class="analysis-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="transition: transform 0.2s; color: var(--text-muted);">
                                     <polyline points="9 18 15 12 9 6"></polyline>
                                 </svg>
-                                <span style="font-weight: 700; color: var(--text-main); font-size: 13.5px; font-family: monospace;">📄 ${run.fileName}</span>
+                                <span style="font-weight: 700; color: var(--text-main); font-size: 13.5px; font-family: monospace;">📄 ${formatLogFileName(run.fileName)}</span>
                             </div>
                             <div style="display: flex; gap: 6px; flex-wrap: wrap;" onclick="event.stopPropagation();">
-                                ${printSessions.length > 0 ? `<span class="printer-status-badge info" style="font-size: 10px; padding: 2px 8px; font-weight: 700; background: rgba(0, 206, 201, 0.12); color: #00cec9; border-color: rgba(0, 206, 201, 0.25); white-space: nowrap;">⏱️ Toplam Baskı: ${totalDurationText}</span>` : ''}
-                                ${sessionCounts.printing > 0 ? `<span class="printer-status-badge printing" style="font-size: 10px; padding: 2px 8px; font-weight: 700;">Aktif: ${sessionCounts.printing}</span>` : ''}
-                                ${sessionCounts.paused > 0 ? `<span class="printer-status-badge connecting" style="font-size: 10px; padding: 2px 8px; font-weight: 700; background: rgba(255, 193, 7, 0.1); color: #ffc107; border-color: rgba(255, 193, 7, 0.25);">Duraklatıldı: ${sessionCounts.paused}</span>` : ''}
-                                <span class="printer-status-badge idle" style="font-size: 10px; padding: 2px 8px; font-weight: 700;">Başarılı: ${successCount}</span>
-                                <span class="printer-status-badge connecting" style="font-size: 10px; padding: 2px 8px; font-weight: 700; background: rgba(255, 107, 0, 0.1); color: #ff9a3c; border-color: rgba(255, 107, 0, 0.25);">İptal: ${cancelCount}</span>
-                                <span class="printer-status-badge printing" style="font-size: 10px; padding: 2px 8px; font-weight: 700; background: rgba(239, 71, 111, 0.1); color: #ef476f; border-color: rgba(239, 71, 111, 0.25);">Hata: ${errorCount}</span>
+                                ${printSessions.length > 0 ? `<span class="printer-status-badge info" style="font-size: 10px; padding: 2px 8px; font-weight: 700; background: rgba(0, 206, 201, 0.12); color: #00cec9; border-color: rgba(0, 206, 201, 0.25); white-space: nowrap;">⏱️ Total Print: ${totalDurationText}</span>` : ''}
+                                ${sessionCounts.printing > 0 ? `<span class="printer-status-badge printing" style="font-size: 10px; padding: 2px 8px; font-weight: 700;">Active: ${sessionCounts.printing}</span>` : ''}
+                                ${sessionCounts.paused > 0 ? `<span class="printer-status-badge connecting" style="font-size: 10px; padding: 2px 8px; font-weight: 700; background: rgba(255, 193, 7, 0.1); color: #ffc107; border-color: rgba(255, 193, 7, 0.25);">Paused: ${sessionCounts.paused}</span>` : ''}
+                                <span class="printer-status-badge idle" style="font-size: 10px; padding: 2px 8px; font-weight: 700;">Success: ${successCount}</span>
+                                <span class="printer-status-badge connecting" style="font-size: 10px; padding: 2px 8px; font-weight: 700; background: rgba(255, 107, 0, 0.1); color: #ff9a3c; border-color: rgba(255, 107, 0, 0.25);">Cancelled: ${cancelCount}</span>
+                                <span class="printer-status-badge printing" style="font-size: 10px; padding: 2px 8px; font-weight: 700; background: rgba(239, 71, 111, 0.1); color: #ef476f; border-color: rgba(239, 71, 111, 0.25);">Errors: ${errorCount}</span>
                             </div>
                         </div>
                         
                         <!-- Card Body -->
-                        <div class="analysis-run-card-body" style="display: ${hasActivity ? 'flex' : 'none'}; flex-direction: column; gap: 18px;">
+                        <div class="analysis-run-card-body" style="display: none; flex-direction: column; gap: 18px;">
                             <!-- Content Flex Grid (Responsive) -->
                             <div style="display: flex; gap: 20px; flex-wrap: wrap; width: 100%;">
                                 
@@ -3481,7 +3562,7 @@ ${evt.payload ? JSON.stringify(evt.payload, null, 2) : evt.raw}
                                 <div style="display: flex; flex-direction: column; gap: 15px; flex: 2; min-width: 380px;">
                                     <!-- Print History -->
                                     <div>
-                                        <h4 style="margin: 0 0 8px 0; font-size: 13.5px; font-weight: 700; text-transform: uppercase; color: var(--accent); letter-spacing: 0.5px;">Baskı Oturumları</h4>
+                                        <h4 style="margin: 0 0 8px 0; font-size: 13.5px; font-weight: 700; text-transform: uppercase; color: var(--accent); letter-spacing: 0.5px;">Print Sessions</h4>
                                         <div class="scrollable-inner-box" style="display: flex; flex-direction: column; gap: 6px; background: var(--surface-3); padding: 12px; border-radius: 6px; border: 1px solid var(--border-light); max-height: 360px; overflow-y: auto;">
                                             ${printHistoryHtml}
                                         </div>
@@ -3490,7 +3571,7 @@ ${evt.payload ? JSON.stringify(evt.payload, null, 2) : evt.raw}
                                 
                                 <!-- Right Column (Peak Temps) -->
                                 <div style="flex: 1; min-width: 200px;">
-                                    <h4 style="margin: 0 0 8px 0; font-size: 13.5px; font-weight: 700; text-transform: uppercase; color: #ffc107; letter-spacing: 0.5px;">Zirve Sıcaklıklar</h4>
+                                    <h4 style="margin: 0 0 8px 0; font-size: 13.5px; font-weight: 700; text-transform: uppercase; color: #ffc107; letter-spacing: 0.5px;">Peak Temperatures</h4>
                                     <div style="display: flex; flex-direction: column; gap: 10px; background: var(--surface-3); padding: 14px; border-radius: 6px; border: 1px solid var(--border-light);">
                                         ${tempsGridHtml}
                                     </div>
@@ -3500,7 +3581,7 @@ ${evt.payload ? JSON.stringify(evt.payload, null, 2) : evt.raw}
                             
                             <!-- Bottom Full Width Column (Errors Table) -->
                             <div style="width: 100%;">
-                                <h4 style="margin: 0 0 8px 0; font-size: 13.5px; font-weight: 700; text-transform: uppercase; color: #ef476f; letter-spacing: 0.5px;">Yakalanan Kritik Hatalar (${errors.length})</h4>
+                                <h4 style="margin: 0 0 8px 0; font-size: 13.5px; font-weight: 700; text-transform: uppercase; color: #ef476f; letter-spacing: 0.5px;">Captured Critical Errors (${errors.length})</h4>
                                 ${errorsTableHtml}
                             </div>
                             
@@ -3517,7 +3598,7 @@ ${evt.payload ? JSON.stringify(evt.payload, null, 2) : evt.raw}
                     'files',
                     filePageMeta.safePage,
                     filePageMeta.totalPages,
-                    `Log dosyası sayfa ${filePageMeta.safePage} / ${filePageMeta.totalPages} · ${filePageMeta.rangeStart}-${filePageMeta.rangeEnd} / ${filePageMeta.totalItems}`
+                    `Log file page ${filePageMeta.safePage} / ${filePageMeta.totalPages} · ${filePageMeta.rangeStart}-${filePageMeta.rangeEnd} / ${filePageMeta.totalItems}`
                 );
             } else {
                 filesPaginationEl.innerHTML = '';
@@ -3525,17 +3606,15 @@ ${evt.payload ? JSON.stringify(evt.payload, null, 2) : evt.raw}
         }
 
         function sortAndDisplay() {
-            const filterVal = filterSelect.value;
             const sortVal = sortSelect.value;
 
             // 1. Filter
             let filteredRuns = runs.slice();
-            const now = new Date();
 
-            if (filterVal !== 'all') {
-                const startValStr = analysisViewState.customStartDate;
-                const endValStr = analysisViewState.customEndDate;
+            const startValStr = analysisViewState.customStartDate;
+            const endValStr = analysisViewState.customEndDate;
 
+            if (startValStr || endValStr) {
                 let startVal = parseYYYYMMDDToLocal(startValStr);
                 if (startVal) startVal.setHours(0, 0, 0, 0);
 
@@ -3550,17 +3629,13 @@ ${evt.payload ? JSON.stringify(evt.payload, null, 2) : evt.raw}
                 });
             }
 
-            // 2. Sort — printer_logs en üstte, sonra seçilen sıralama
+            // 2. Sort
             if (sortVal === 'newest') {
                 filteredRuns.sort((a, b) => {
-                    if (a.fileName === 'printer_logs.txt') return -1;
-                    if (b.fileName === 'printer_logs.txt') return 1;
                     return getRunDate(b) - getRunDate(a);
                 });
             } else if (sortVal === 'oldest') {
                 filteredRuns.sort((a, b) => {
-                    if (a.fileName === 'printer_logs.txt') return -1;
-                    if (b.fileName === 'printer_logs.txt') return 1;
                     return getRunDate(a) - getRunDate(b);
                 });
             } else if (sortVal === 'errors-desc') {
@@ -3580,7 +3655,7 @@ ${evt.payload ? JSON.stringify(evt.payload, null, 2) : evt.raw}
 
             // 3. Display
             if (filteredRuns.length === 0) {
-                container.innerHTML = `<div style="text-align: center; color: var(--text-muted); padding: 30px;">Seçilen tarih aralığında analiz verisi bulunamadı.</div>`;
+                container.innerHTML = `<div style="text-align: center; color: var(--text-muted); padding: 30px;">No analysis data found for the selected date range.</div>`;
                 filesPaginationEl.innerHTML = '';
             } else {
                 displayCards(pagedRuns, {
@@ -3624,44 +3699,6 @@ ${evt.payload ? JSON.stringify(evt.payload, null, 2) : evt.raw}
             Object.keys(analysisViewState.sessionPages).forEach(k => delete analysisViewState.sessionPages[k]);
             sortAndDisplay();
         };
-        filterSelect.onchange = () => {
-            const val = filterSelect.value;
-            analysisViewState.filterVal = val;
-
-            if (val === 'all') {
-                analysisViewState.customStartDate = '';
-                analysisViewState.customEndDate = '';
-            } else if (val !== 'custom') {
-                const now = new Date();
-                let start = null;
-                let end = now;
-                if (val === '24h') {
-                    start = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-                } else if (val === '7d') {
-                    start = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-                } else if (val === '30d') {
-                    start = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-                } else if (val === '90d') {
-                    start = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
-                } else if (val === '365d') {
-                    start = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
-                }
-
-                if (start) {
-                    analysisViewState.customStartDate = formatDateToYYYYMMDD(start);
-                    analysisViewState.customEndDate = formatDateToYYYYMMDD(end);
-                }
-            }
-
-            const startEl = document.getElementById('analysis-start-date');
-            const endEl = document.getElementById('analysis-end-date');
-            if (startEl) startEl.value = analysisViewState.customStartDate;
-            if (endEl) endEl.value = analysisViewState.customEndDate;
-
-            analysisViewState.filesPage = 1;
-            Object.keys(analysisViewState.sessionPages).forEach(k => delete analysisViewState.sessionPages[k]);
-            sortAndDisplay();
-        };
 
         const startDateInput = document.getElementById('analysis-start-date');
         const endDateInput = document.getElementById('analysis-end-date');
@@ -3669,10 +3706,6 @@ ${evt.payload ? JSON.stringify(evt.payload, null, 2) : evt.raw}
         const onCustomDateChange = () => {
             analysisViewState.customStartDate = startDateInput.value;
             analysisViewState.customEndDate = endDateInput.value;
-            analysisViewState.filterVal = 'custom';
-            if (filterSelect) {
-                filterSelect.value = 'custom';
-            }
             analysisViewState.filesPage = 1;
             Object.keys(analysisViewState.sessionPages).forEach(k => delete analysisViewState.sessionPages[k]);
             sortAndDisplay();
@@ -3717,12 +3750,13 @@ ${evt.payload ? JSON.stringify(evt.payload, null, 2) : evt.raw}
             // Also update total duration when content is reloaded
             ipcRenderer.invoke('get-printer-total-duration', id).then(totalMins => {
                 const totalDurationText = formatDuration(totalMins);
-                titleEl.innerText = `${p.name || 'Bilinmiyor'} - Log Analiz Raporu (Toplam Baskı Süresi: ${totalDurationText})`;
+                titleEl.innerText = `${p.name || 'Unknown'} - Log Analysis Report (Total Print Time: ${totalDurationText})`;
             }).catch(err => {
                 console.error('[Analysis] Failed to load total print duration:', err);
             });
 
-            const dbRuns = await ipcRenderer.invoke('get-printer-runs', id);
+            const allDbRuns = await ipcRenderer.invoke('get-printer-runs', id) || [];
+            const dbRuns = allDbRuns.filter(run => run.fileName !== 'printer_logs.txt');
             let printerStats = null;
             try {
                 printerStats = await ipcRenderer.invoke('get-printer-stats', id);
@@ -3732,7 +3766,7 @@ ${evt.payload ? JSON.stringify(evt.payload, null, 2) : evt.raw}
 
             if (dbRuns && dbRuns.length > 0) {
                 rawTextContent = dbRuns.map(run => {
-                    return `============================================================\n📊 LOG KAYITLARI SENKRONİZASYON VE ANALİZİ - DOSYA: ${run.fileName}\n============================================================\n${run.reportContent}`;
+                    return `============================================================\n📊 LOG SYNCHRONIZATION & ANALYSIS REPORT - FILE: ${formatLogFileName(run.fileName)}\n============================================================\n${run.reportContent}`;
                 }).join('\n\n');
                 preEl.innerText = '';
 
@@ -3755,21 +3789,21 @@ ${evt.payload ? JSON.stringify(evt.payload, null, 2) : evt.raw}
                     preEl.scrollTop = preEl.scrollHeight;
                 }, 50);
             } else {
-                const missingText = `Yazıcı için henüz analiz raporu oluşturulmamış.\n\nLütfen logları analiz etmek için önce "Analiz Et" butonuna tıklayın.`;
+                const missingText = `No analysis report has been generated for this printer yet.\n\nPlease click "Analyze" to analyze the logs.`;
                 preEl.innerText = missingText;
                 structuredDiv.innerHTML = `
                     <div style="text-align: center; color: var(--text-muted); padding: 40px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;">
                         <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity: 0.5; stroke: var(--accent);">
                             <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
                         </svg>
-                        <h3 style="font-size: 15px; font-weight: 600; color: #fff; margin: 0;">Rapor Dosyası Bulunamadı</h3>
-                        <p style="font-size: 12.5px; max-width: 300px; line-height: 1.5; margin: 0 0 10px 0;">Yazıcı için henüz analiz raporu oluşturulmamış.</p>
-                        <button class="btn-primary" onclick="document.getElementById('analysis-results-modal').classList.add('hidden'); analyzeLanLogs('${p.id}');" style="font-size: 12px; padding: 6px 14px; height: auto; margin: 0; width: auto;">Analizi Şimdi Başlat</button>
+                        <h3 style="font-size: 15px; font-weight: 600; color: #fff; margin: 0;">Report Not Found</h3>
+                        <p style="font-size: 12.5px; max-width: 300px; line-height: 1.5; margin: 0 0 10px 0;">No analysis report has been generated for this printer yet.</p>
+                        <button class="btn-primary" onclick="document.getElementById('analysis-results-modal').classList.add('hidden'); analyzeLanLogs('${p.id}');" style="font-size: 12px; padding: 6px 14px; height: auto; margin: 0; width: auto;">Start Analysis Now</button>
                     </div>
                 `;
             }
         } catch (e) {
-            const errText = `Rapor dosyası okunurken bir hata oluştu:\n${e.message}`;
+            const errText = `An error occurred while reading the report file:\n${e.message}`;
             preEl.innerText = errText;
             structuredDiv.innerHTML = `<div style="text-align: center; color: var(--text-muted); padding: 30px;">${errText}</div>`;
         }
@@ -3799,7 +3833,8 @@ ${evt.payload ? JSON.stringify(evt.payload, null, 2) : evt.raw}
     };
 
     try {
-        const dbRuns = await ipcRenderer.invoke('get-printer-runs', id);
+        const allDbRuns = await ipcRenderer.invoke('get-printer-runs', id) || [];
+        const dbRuns = allDbRuns.filter(run => run.fileName !== 'printer_logs.txt');
         if (!dbRuns || dbRuns.length === 0) {
             console.log('[Analysis] No database runs found, triggering analysis for printer:', id);
             refreshData();
@@ -3925,24 +3960,11 @@ function buildProgressString(p, curProg) {
 }
 
 async function logPrinterEvent(printer, eventType, message) {
-    if (printer.mode !== 'lan') return;
-    try {
-        await ipcRenderer.invoke('log-printer-event', {
-            printerId: printer.id,
-            eventType: eventType,
-            message: message
-        });
-        console.log(`[LAN Log] Wrote event to db: ${message}`);
-        if (window.refreshAnalysisModalContent && analysisViewState.printerId === printer.id) {
-            window.refreshAnalysisModalContent();
-        }
-    } catch (e) {
-        console.error('Failed to log printer event to db:', e);
-    }
+    // Disabled live event logging as requested
 }
 
 function createPrinterFolderAndLog(printer, initialMessage) {
-    logPrinterEvent(printer, 'system', initialMessage);
+    // Disabled
 }
 
 // Modal Logic

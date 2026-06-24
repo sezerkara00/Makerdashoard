@@ -223,10 +223,16 @@ function createWindow() {
 app.whenReady().then(() => {
     initializeDefaultConfigurations();
     try {
-        const { migrateLegacyDb, runUntruncatedErrorsMigration } = require('./services/database');
+        const { migrateLegacyDb, runUntruncatedErrorsMigration, runC2pParserMigration, removePrinterLogsMigration } = require('./services/database');
         migrateLegacyDb();
         if (runUntruncatedErrorsMigration) {
             runUntruncatedErrorsMigration();
+        }
+        if (runC2pParserMigration) {
+            runC2pParserMigration();
+        }
+        if (removePrinterLogsMigration) {
+            removePrinterLogsMigration();
         }
 
         // Recalculate print durations and stats on startup to fix legacy data discrepancies
@@ -565,199 +571,6 @@ ipcMain.handle('get-printer-stats', (event, printerId) => {
         avgTimePerPrint: '0sn'
     };
     return db.get('stats').value() || defaultStats;
-});
-
-ipcMain.handle('log-printer-event', async (_event, { printerId, eventType, message }) => {
-    const { getPrinterDb } = require('./services/database');
-    const db = getPrinterDb(printerId);
-    const { extractAnalysisTime, extractAnalysisFile, buildPrintSessionsFromEvents } = require('./services/log-analyzer');
-    
-    const fileName = 'printer_logs.txt';
-    let run = db.get('analysis_runs').find({ fileName }).value();
-    if (!run) {
-        run = {
-            printerId,
-            fileName,
-            lastSyncTime: new Date().toLocaleString('tr-TR'),
-            fileSize: 0,
-            summary: { success: 0, cancelled: 0, paused: 0, errors: 0 },
-            baskiRaporu: [],
-            errors: [],
-            maxTemps: [],
-            serverLogs: [],
-            printSessions: [],
-            reportContent: ''
-        };
-        db.get('analysis_runs').push(run).write();
-        run = db.get('analysis_runs').find({ fileName }).value();
-    }
-    
-    const pad = (n) => String(n).padStart(2, '0');
-    const d = new Date();
-    const timestamp = `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-    
-    // Normalize event type and build clean standard format: [timestamp] [TYPE] message
-    let normalizedType = eventType.toLowerCase();
-    let cleanMessage = message;
-    
-    if (normalizedType === 'status') {
-        if (message.includes('Baskı Başladı')) normalizedType = 'start';
-        else if (message.includes('Baskı Bitti') || message.includes('Baskı Tamamlandı')) normalizedType = 'success';
-        else if (message.includes('Baskı İptal')) normalizedType = 'cancel';
-        else if (message.includes('Duraklatıldı')) normalizedType = 'pause';
-        else if (message.includes('Sürdürüldü')) normalizedType = 'resume';
-    }
-    
-    // Remove duplicate emojis if present in the message
-    cleanMessage = cleanMessage.replace(/^[🚀✅❌⏸️▶️⚠️]\s*/, '');
-    
-    const eventText = `[${timestamp}] [${normalizedType.toUpperCase()}] ${cleanMessage}`;
-    
-    let type = 'info';
-    if (normalizedType === 'start') type = 'start';
-    else if (normalizedType === 'success') type = 'success';
-    else if (normalizedType === 'cancel') type = 'cancel';
-    else if (normalizedType === 'pause') type = 'pause';
-    else if (normalizedType === 'resume') type = 'resume';
-    else if (normalizedType === 'progress') type = 'progress';
-    else if (normalizedType === 'error') type = 'error';
-    
-    const eventObj = { type, text: eventText };
-    
-    if (type === 'progress') {
-        const lastIdx = run.baskiRaporu.length - 1;
-        if (lastIdx >= 0 && (run.baskiRaporu[lastIdx].type === 'progress' || run.baskiRaporu[lastIdx].text.includes('[PROGRESS]') || run.baskiRaporu[lastIdx].text.includes('Yazdırılıyor:'))) {
-            run.baskiRaporu[lastIdx] = eventObj;
-        } else {
-            run.baskiRaporu.push(eventObj);
-        }
-    } else {
-        run.baskiRaporu.push(eventObj);
-    }
-    
-    if (type === 'success') run.summary.success++;
-    if (type === 'cancel') run.summary.cancelled++;
-    if (type === 'pause') run.summary.paused++;
-    
-    if (eventType === 'error') {
-        run.summary.errors++;
-        let errorDuration = null;
-        const lastStart = [...run.baskiRaporu].reverse().find(e => e.type === 'start');
-        if (lastStart) {
-            const startTimeStr = extractAnalysisTime(lastStart.text);
-            if (startTimeStr) {
-                const parseTrLogDate = (str) => {
-                    if (!str) return null;
-                    const parts = str.trim().split(/\s+/);
-                    if (parts.length < 2) return null;
-                    const dateParts = parts[0].split('.');
-                    const timeParts = parts[1].split(':');
-                    return new Date(
-                        parseInt(dateParts[2], 10),
-                        parseInt(dateParts[1], 10) - 1,
-                        parseInt(dateParts[0], 10),
-                        parseInt(timeParts[0], 10),
-                        parseInt(timeParts[1], 10),
-                        parseInt(timeParts[2], 10)
-                    );
-                };
-                const startD = parseTrLogDate(startTimeStr);
-                const currentD = new Date();
-                if (startD) {
-                    const diffMin = Math.round((currentD - startD) / 60000);
-                    if (diffMin >= 0) errorDuration = diffMin;
-                }
-            }
-        }
-        
-        run.errors.push({
-            time: timestamp,
-            code: "DASHBOARD_ERR",
-            type: "DASHBOARD_ERR",
-            title: "Dashboard Hata Kaydı",
-            duration: errorDuration !== null ? `${errorDuration} dk` : '-',
-            desc: message,
-            context: "Canlı olay kaydı sırasında yakalanan hata.",
-            recentGcodes: []
-        });
-    }
-    
-    if (eventType === 'progress') {
-        const text = message;
-        const sensors = ['T0', 'T1', 'T2', 'T3', 'Bed', 'Env'];
-        sensors.forEach(s => {
-            const r = new RegExp(s + ':\\s*(\\d+)');
-            const match = text.match(r);
-            if (match) {
-                const val = parseFloat(match[1]);
-                const sensorName = s === 'Bed' ? 'heater_bed' : s === 'Env' ? 'env' : s.toLowerCase();
-                const existing = run.maxTemps.find(t => t.sensor === sensorName);
-                if (existing) {
-                    const existingVal = parseFloat(existing.value) || 0;
-                    if (val > existingVal) {
-                        existing.value = `${val.toFixed(1)} °C`;
-                    }
-                } else {
-                    run.maxTemps.push({ sensor: sensorName, value: `${val.toFixed(1)} °C` });
-                }
-            }
-        });
-    }
-    
-    run.printSessions = buildPrintSessionsFromEvents(run.baskiRaporu, run.maxTemps);
-    
-    let report = '';
-    report += `============================================================\n`;
-    report += `=== MAKERDASHBOARD GERÇEK BASKI RAPORU ===\n`;
-    report += `Log Başlangıcı: -\n`;
-    run.baskiRaporu.slice().reverse().forEach(evt => {
-        report += evt.text + '\n';
-    });
-    report += `============================================================\n`;
-    
-    report += `\n=== BASKI ESNASINDA ÖLÇÜLEN MAKSIMUM GERÇEK SICAKLIKLAR ===\n`;
-    run.maxTemps.forEach(t => {
-        report += `${t.sensor}: ${t.value}\n`;
-    });
-    report += `============================================================\n`;
-    
-    report += `\n===================================================================================================================\n`;
-    report += `              📊 MAKERDASHBOARD GERÇEK ZAMANLI SENKRONİZE MAP TABLOSU               \n`;
-    report += `===================================================================================================================\n`;
-    report += `\n[GENEL ÖZET] Gerçek Başarılı: ${run.summary.success} | Gerçek İptal: ${run.summary.cancelled} | Duraklatıldı: ${run.summary.paused} | Yakalanan Hatalar: ${run.summary.errors}\n`;
-    report += `\n[YAKALANAN TÜM KRİTİK HATALARIN LİSTESİ]\n`;
-    if (run.errors.length > 0) {
-        report += `+----------+---------------+---------------------------+----------+---------------------------------------------+\n`;
-        report += `| Saat     | Hata Kodu     | Hata Başlığı              | Süre     | Ayıklanan Açıklama                          |\n`;
-        report += `+----------+---------------+---------------------------+----------+---------------------------------------------+\n`;
-        run.errors.forEach(err => {
-            const timeStr = String(err.time || '').padEnd(8);
-            const codeStr = String(err.code || err.type || '').padEnd(13);
-            const titleStr = String(err.title || '').padEnd(25);
-            const durationStr = String(err.duration || '-').padEnd(8);
-            const descStr = String(err.desc || '');
-            const shortDesc = descStr.length <= 46 ? descStr : descStr.substring(0, 44) + "...";
-            const paddedDesc = shortDesc.padEnd(43);
-            report += `| ${timeStr} | ${codeStr} | ${titleStr} | ${durationStr} | ${paddedDesc} |\n`;
-        });
-        report += `+----------+---------------+---------------------------+----------+---------------------------------------------+\n`;
-    } else {
-        report += `+-----------------------------------------------------------------------------------------------------------------------+\n`;
-        report += `| Şu an aktif log dosyasında eşleşen dinamik bir hata kaydı bulunmuyor.                                                 |\n`;
-        report += `+-----------------------------------------------------------------------------------------------------------------------+\n`;
-    }
-    
-    run.reportContent = report;
-    run.lastSyncTime = new Date().toLocaleString('tr-TR');
-    
-    db.write();
-    try {
-        const { updateTotalPrintDuration } = require('./services/log-analyzer');
-        updateTotalPrintDuration(printerId);
-    } catch (e) {
-        console.error('[log-printer-event] Failed to update total print duration:', e.message);
-    }
-    return { success: true };
 });
 
 // ─── OS Native Bildirim (her zaman - uygulamadan bağımsız) ───────────────────
